@@ -35,6 +35,15 @@ sed -i '' 's/alt="OpenClaw"/alt="Phoenix"/g' \
 sed -i '' 's/<div class="brand-title">OPENCLAW<\/div>/<div class="brand-title">PHOENIX<\/div>/g' \
   ui/src/ui/app-render.ts
 
+# 5b. Replace favicon with Phoenix logo
+if [ -f "ui/public/phoenix-logo.png" ]; then
+  sed -i '' 's|src="/favicon.svg"|src="/phoenix-logo.png"|g' \
+    ui/src/ui/app-render.ts
+  echo "  - Logo replaced with phoenix-logo.png"
+else
+  echo "  - WARNING: ui/public/phoenix-logo.png not found, keeping default logo"
+fi
+
 # 6. Gateway client name - DO NOT CHANGE
 # The client ID "openclaw-control-ui" is validated by the gateway protocol
 # and must remain unchanged for WebSocket connections to work

@@ -124,10 +124,10 @@ export function renderApp(state: AppViewState) {
           </button>
           <div class="brand">
             <div class="brand-logo">
-              <img src="/favicon.svg" alt="OpenClaw" />
+              <img src="/phoenix-logo.png" alt="Phoenix" />
             </div>
             <div class="brand-text">
-              <div class="brand-title">OPENCLAW</div>
+              <div class="brand-title">PHOENIX</div>
               <div class="brand-sub">Gateway Dashboard</div>
             </div>
           </div>
