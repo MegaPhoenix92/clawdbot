@@ -1,19 +1,16 @@
 import { html, nothing } from "lit";
-
-import { clampText, formatAgo, formatList } from "../format";
-import type {
-  ExecApprovalsAllowlistEntry,
-  ExecApprovalsFile,
-  ExecApprovalsSnapshot,
-} from "../controllers/exec-approvals";
 import type {
   DevicePairingList,
   DeviceTokenSummary,
   PairedDevice,
   PendingDevice,
-} from "../controllers/devices";
-import type { DMPairingState } from "../controllers/dm-pairing";
-import { renderDMPairing } from "./dm-pairing";
+} from "../controllers/devices.ts";
+import type {
+  ExecApprovalsAllowlistEntry,
+  ExecApprovalsFile,
+  ExecApprovalsSnapshot,
+} from "../controllers/exec-approvals.ts";
+import { clampText, formatAgo, formatList } from "../format.ts";
 
 export type NodesProps = {
   loading: boolean;
@@ -21,10 +18,6 @@ export type NodesProps = {
   devicesLoading: boolean;
   devicesError: string | null;
   devicesList: DevicePairingList | null;
-  dmPairingState: DMPairingState;
-  onDMPairingRefresh: () => void;
-  onDMPairingApprove: (channel: string, code: string) => void;
-  onDMPairingReject: (channel: string, code: string) => void;
   configForm: Record<string, unknown> | null;
   configLoading: boolean;
   configSaving: boolean;
@@ -63,7 +56,6 @@ export function renderNodes(props: NodesProps) {
     ${renderExecApprovals(approvalsState)}
     ${renderBindings(bindingState)}
     ${renderDevices(props)}
-    ${renderDMPairingSection(props)}
     <section class="card">
       <div class="row" style="justify-content: space-between;">
         <div>
@@ -131,41 +123,6 @@ function renderDevices(props: NodesProps) {
               `
             : nothing
         }
-      </div>
-    </section>
-  `;
-}
-
-function renderDMPairingSection(props: NodesProps) {
-  const totalRequests = props.dmPairingState.list?.channels?.reduce(
-    (sum, ch) => sum + ch.requests.length,
-    0,
-  ) ?? 0;
-  return html`
-    <section class="card">
-      <div class="row" style="justify-content: space-between;">
-        <div>
-          <div class="card-title">DM Pairing Requests</div>
-          <div class="card-sub">
-            Approve or reject incoming DM pairing requests from messaging channels.
-            ${totalRequests > 0 ? html`<span class="chip">${totalRequests} pending</span>` : nothing}
-          </div>
-        </div>
-        <button
-          class="btn"
-          ?disabled=${props.dmPairingState.loading}
-          @click=${props.onDMPairingRefresh}
-        >
-          ${props.dmPairingState.loading ? "Loading…" : "Refresh"}
-        </button>
-      </div>
-      <div style="margin-top: 16px;">
-        ${renderDMPairing(
-          props.dmPairingState,
-          props.onDMPairingApprove,
-          props.onDMPairingReject,
-          props.onDMPairingRefresh,
-        )}
       </div>
     </section>
   `;
@@ -371,12 +328,16 @@ function resolveBindingsState(props: NodesProps): BindingState {
 }
 
 function normalizeSecurity(value?: string): ExecSecurity {
-  if (value === "allowlist" || value === "full" || value === "deny") return value;
+  if (value === "allowlist" || value === "full" || value === "deny") {
+    return value;
+  }
   return "deny";
 }
 
 function normalizeAsk(value?: string): ExecAsk {
-  if (value === "always" || value === "off" || value === "on-miss") return value;
+  if (value === "always" || value === "off" || value === "on-miss") {
+    return value;
+  }
   return "on-miss";
 }
 
@@ -397,10 +358,14 @@ function resolveConfigAgents(config: Record<string, unknown> | null): ExecApprov
   const list = Array.isArray(agentsNode.list) ? agentsNode.list : [];
   const agents: ExecApprovalsAgentOption[] = [];
   list.forEach((entry) => {
-    if (!entry || typeof entry !== "object") return;
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
     const record = entry as Record<string, unknown>;
     const id = typeof record.id === "string" ? record.id.trim() : "";
-    if (!id) return;
+    if (!id) {
+      return;
+    }
     const name = typeof record.name === "string" ? record.name.trim() : undefined;
     const isDefault = record.default === true;
     agents.push({ id, name: name || undefined, isDefault });
@@ -417,7 +382,9 @@ function resolveExecApprovalsAgents(
   const merged = new Map<string, ExecApprovalsAgentOption>();
   configAgents.forEach((agent) => merged.set(agent.id, agent));
   approvalsAgents.forEach((id) => {
-    if (merged.has(id)) return;
+    if (merged.has(id)) {
+      return;
+    }
     merged.set(id, { id });
   });
   const agents = Array.from(merged.values());
@@ -425,8 +392,12 @@ function resolveExecApprovalsAgents(
     agents.push({ id: "main", isDefault: true });
   }
   agents.sort((a, b) => {
-    if (a.isDefault && !b.isDefault) return -1;
-    if (!a.isDefault && b.isDefault) return 1;
+    if (a.isDefault && !b.isDefault) {
+      return -1;
+    }
+    if (!a.isDefault && b.isDefault) {
+      return 1;
+    }
     const aLabel = a.name?.trim() ? a.name : a.id;
     const bLabel = b.name?.trim() ? b.name : b.id;
     return aLabel.localeCompare(bLabel);
@@ -438,8 +409,12 @@ function resolveExecApprovalsScope(
   selected: string | null,
   agents: ExecApprovalsAgentOption[],
 ): string {
-  if (selected === EXEC_APPROVALS_DEFAULT_SCOPE) return EXEC_APPROVALS_DEFAULT_SCOPE;
-  if (selected && agents.some((agent) => agent.id === selected)) return selected;
+  if (selected === EXEC_APPROVALS_DEFAULT_SCOPE) {
+    return EXEC_APPROVALS_DEFAULT_SCOPE;
+  }
+  if (selected && agents.some((agent) => agent.id === selected)) {
+    return selected;
+  }
   return EXEC_APPROVALS_DEFAULT_SCOPE;
 }
 
@@ -1053,9 +1028,13 @@ function resolveExecNodes(nodes: Array<Record<string, unknown>>): BindingNode[] 
   for (const node of nodes) {
     const commands = Array.isArray(node.commands) ? node.commands : [];
     const supports = commands.some((cmd) => String(cmd) === "system.run");
-    if (!supports) continue;
+    if (!supports) {
+      continue;
+    }
     const nodeId = typeof node.nodeId === "string" ? node.nodeId.trim() : "";
-    if (!nodeId) continue;
+    if (!nodeId) {
+      continue;
+    }
     const displayName =
       typeof node.displayName === "string" && node.displayName.trim()
         ? node.displayName.trim()
@@ -1079,9 +1058,13 @@ function resolveExecApprovalsNodes(
       (cmd) =>
         String(cmd) === "system.execApprovals.get" || String(cmd) === "system.execApprovals.set",
     );
-    if (!supports) continue;
+    if (!supports) {
+      continue;
+    }
     const nodeId = typeof node.nodeId === "string" ? node.nodeId.trim() : "";
-    if (!nodeId) continue;
+    if (!nodeId) {
+      continue;
+    }
     const displayName =
       typeof node.displayName === "string" && node.displayName.trim()
         ? node.displayName.trim()
@@ -1122,10 +1105,14 @@ function resolveAgentBindings(config: Record<string, unknown> | null): {
 
   const agents: BindingAgent[] = [];
   list.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
     const record = entry as Record<string, unknown>;
     const id = typeof record.id === "string" ? record.id.trim() : "";
-    if (!id) return;
+    if (!id) {
+      return;
+    }
     const name = typeof record.name === "string" ? record.name.trim() : undefined;
     const isDefault = record.default === true;
     const toolsEntry = (record.tools ?? {}) as Record<string, unknown>;

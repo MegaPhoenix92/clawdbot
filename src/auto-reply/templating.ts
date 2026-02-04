@@ -1,11 +1,11 @@
 import type { ChannelId } from "../channels/plugins/types.js";
-import type { StickerMetadata } from "../telegram/bot/types.js";
-import type { InternalMessageChannel } from "../utils/message-channel.js";
-import type { CommandArgs } from "./commands-registry.types.js";
 import type {
   MediaUnderstandingDecision,
   MediaUnderstandingOutput,
 } from "../media-understanding/types.js";
+import type { StickerMetadata } from "../telegram/bot/types.js";
+import type { InternalMessageChannel } from "../utils/message-channel.js";
+import type { CommandArgs } from "./commands-registry.types.js";
 
 /** Valid message channels for routing. */
 export type OriginatingChannelType = ChannelId | InternalMessageChannel;
@@ -101,6 +101,8 @@ export type MsgContext = {
   CommandAuthorized?: boolean;
   CommandSource?: "text" | "native";
   CommandTargetSessionKey?: string;
+  /** Gateway client scopes when the message originates from the gateway. */
+  GatewayClientScopes?: string[];
   /** Thread identifier (Telegram topic id or Matrix thread event id). */
   MessageThreadId?: string | number;
   /** Telegram forum supergroup marker. */

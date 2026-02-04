@@ -1,28 +1,32 @@
-import { loadChatHistory } from "./controllers/chat";
-import { loadDevices } from "./controllers/devices";
-import { loadDMPairing, type DMPairingState } from "./controllers/dm-pairing";
-import { loadNodes } from "./controllers/nodes";
-import { loadAgents } from "./controllers/agents";
-import type { GatewayEventFrame, GatewayHelloOk } from "./gateway";
-import { GatewayBrowserClient } from "./gateway";
-import type { EventLogEntry } from "./app-events";
-import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types";
-import type { Tab } from "./navigation";
-import type { UiSettings } from "./storage";
-import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream";
-import { CHAT_SESSIONS_ACTIVE_MINUTES, flushChatQueueForEvent } from "./app-chat";
-import { applySettings, loadCron, refreshActiveTab, setLastActiveSessionKey } from "./app-settings";
-import { handleChatEvent, type ChatEventPayload } from "./controllers/chat";
+import type { EventLogEntry } from "./app-events.ts";
+import type { OpenClawApp } from "./app.ts";
+import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
+import type { GatewayEventFrame, GatewayHelloOk } from "./gateway.ts";
+import type { Tab } from "./navigation.ts";
+import type { UiSettings } from "./storage.ts";
+import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types.ts";
+import { CHAT_SESSIONS_ACTIVE_MINUTES, flushChatQueueForEvent } from "./app-chat.ts";
+import {
+  applySettings,
+  loadCron,
+  refreshActiveTab,
+  setLastActiveSessionKey,
+} from "./app-settings.ts";
+import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
+import { loadAgents } from "./controllers/agents.ts";
+import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
+import { loadChatHistory } from "./controllers/chat.ts";
+import { handleChatEvent, type ChatEventPayload } from "./controllers/chat.ts";
+import { loadDevices } from "./controllers/devices.ts";
 import {
   addExecApproval,
   parseExecApprovalRequested,
   parseExecApprovalResolved,
   removeExecApproval,
-} from "./controllers/exec-approval";
-import type { OpenClawApp } from "./app";
-import type { ExecApprovalRequest } from "./controllers/exec-approval";
-import { loadAssistantIdentity } from "./controllers/assistant-identity";
-import { loadSessions } from "./controllers/sessions";
+} from "./controllers/exec-approval.ts";
+import { loadNodes } from "./controllers/nodes.ts";
+import { loadSessions } from "./controllers/sessions.ts";
+import { GatewayBrowserClient } from "./gateway.ts";
 
 type GatewayHost = {
   settings: UiSettings;
@@ -50,7 +54,6 @@ type GatewayHost = {
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
-  dmPairingState: DMPairingState;
 };
 
 type SessionDefaultsSnapshot = {
@@ -66,8 +69,12 @@ function normalizeSessionKeyForDefaults(
 ): string {
   const raw = (value ?? "").trim();
   const mainSessionKey = defaults.mainSessionKey?.trim();
-  if (!mainSessionKey) return raw;
-  if (!raw) return mainSessionKey;
+  if (!mainSessionKey) {
+    return raw;
+  }
+  if (!raw) {
+    return mainSessionKey;
+  }
   const mainKey = defaults.mainKey?.trim() || "main";
   const defaultAgentId = defaults.defaultAgentId?.trim();
   const isAlias =
@@ -79,7 +86,9 @@ function normalizeSessionKeyForDefaults(
 }
 
 function applySessionDefaults(host: GatewayHost, defaults?: SessionDefaultsSnapshot) {
-  if (!defaults?.mainSessionKey) return;
+  if (!defaults?.mainSessionKey) {
+    return;
+  }
   const resolvedSessionKey = normalizeSessionKeyForDefaults(host.sessionKey, defaults);
   const resolvedSettingsSessionKey = normalizeSessionKeyForDefaults(
     host.settings.sessionKey,
@@ -135,10 +144,6 @@ export function connectGateway(host: GatewayHost) {
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
-      // Initialize DM pairing state
-      host.dmPairingState.client = host.client;
-      host.dmPairingState.connected = true;
-      void loadDMPairing(host.dmPairingState, { quiet: true });
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
     },
     onClose: ({ code, reason }) => {
@@ -174,7 +179,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   }
 
   if (evt.event === "agent") {
-    if (host.onboarding) return;
+    if (host.onboarding) {
+      return;
+    }
     handleAgentEvent(
       host as unknown as Parameters<typeof handleAgentEvent>[0],
       evt.payload as AgentEventPayload | undefined,
@@ -204,7 +211,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         }
       }
     }
-    if (state === "final") void loadChatHistory(host as unknown as OpenClawApp);
+    if (state === "final") {
+      void loadChatHistory(host as unknown as OpenClawApp);
+    }
     return;
   }
 
@@ -224,10 +233,6 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
   if (evt.event === "device.pair.requested" || evt.event === "device.pair.resolved") {
     void loadDevices(host as unknown as OpenClawApp, { quiet: true });
-  }
-
-  if (evt.event === "dm.pair.requested" || evt.event === "dm.pair.resolved") {
-    void loadDMPairing(host.dmPairingState, { quiet: true });
   }
 
   if (evt.event === "exec.approval.requested") {

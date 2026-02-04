@@ -1091,7 +1091,7 @@ Set `channels.telegram.configWrites: false` to block Telegram-initiated config w
         autoSelectFamily: false,
       },
       proxy: "socks5://localhost:9050",
-      webhookUrl: "https://example.com/telegram-webhook",
+      webhookUrl: "https://example.com/telegram-webhook", // requires webhookSecret
       webhookSecret: "secret",
       webhookPath: "/telegram-webhook",
     },
@@ -2952,6 +2952,7 @@ Control UI base path:
 - `gateway.controlUi.basePath` sets the URL prefix where the Control UI is served.
 - Examples: `"/ui"`, `"/openclaw"`, `"/apps/openclaw"`.
 - Default: root (`/`) (unchanged).
+- `gateway.controlUi.root` sets the filesystem root for Control UI assets (default: `dist/control-ui`).
 - `gateway.controlUi.allowInsecureAuth` allows token-only auth for the Control UI when
   device identity is omitted (typically over HTTP). Default: `false`. Prefer HTTPS
   (Tailscale Serve) or `127.0.0.1`.
