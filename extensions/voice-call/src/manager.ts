@@ -58,11 +58,20 @@ export class CallManager {
   >();
   /** Max duration timers to auto-hangup calls after configured timeout */
   private maxDurationTimers = new Map<CallId, NodeJS.Timeout>();
+  /** Optional callback invoked once per call when it reaches a terminal state. */
+  private onCallEnded?: (call: CallRecord) => void;
+  /** Guard against duplicate callback invocations for the same call. */
+  private callEndedFired = new Set<CallId>();
 
-  constructor(config: VoiceCallConfig, storePath?: string) {
+  constructor(
+    config: VoiceCallConfig,
+    storePath?: string,
+    onCallEnded?: (call: CallRecord) => void,
+  ) {
     this.config = config;
     // Resolve store path with tilde expansion (like other config values)
     this.storePath = resolveDefaultStoreBase(config, storePath);
+    this.onCallEnded = onCallEnded;
   }
 
   /**
@@ -444,6 +453,7 @@ export class CallManager {
       this.persistCallRecord(call);
       this.clearMaxDurationTimer(callId);
       this.rejectTranscriptWaiter(callId, "Call ended: hangup-bot");
+      this.fireCallEnded(call);
       this.activeCalls.delete(callId);
       if (call.providerCallId) {
         this.providerCallIdMap.delete(call.providerCallId);
@@ -631,6 +641,7 @@ export class CallManager {
         this.transitionState(call, event.reason as CallState);
         this.clearMaxDurationTimer(call.callId);
         this.rejectTranscriptWaiter(call.callId, `Call ended: ${event.reason}`);
+        this.fireCallEnded(call);
         this.activeCalls.delete(call.callId);
         if (call.providerCallId) {
           this.providerCallIdMap.delete(call.providerCallId);
@@ -644,6 +655,7 @@ export class CallManager {
           this.transitionState(call, "error");
           this.clearMaxDurationTimer(call.callId);
           this.rejectTranscriptWaiter(call.callId, `Call error: ${event.error}`);
+          this.fireCallEnded(call);
           this.activeCalls.delete(call.callId);
           if (call.providerCallId) {
             this.providerCallIdMap.delete(call.providerCallId);
@@ -872,6 +884,25 @@ export class CallManager {
         }
       }
     }
+  }
+
+  /**
+   * Fire the onCallEnded callback exactly once per call.
+   * The guard set is pruned after invocation to avoid unbounded growth.
+   */
+  private fireCallEnded(call: CallRecord): void {
+    if (!this.onCallEnded || this.callEndedFired.has(call.callId)) {
+      return;
+    }
+    this.callEndedFired.add(call.callId);
+    try {
+      this.onCallEnded(call);
+    } catch {
+      // Callback errors must not break call state management.
+    }
+    // Schedule pruning so the guard survives any synchronous re-entry from
+    // the same event loop turn, but doesn't leak for long-running gateways.
+    setTimeout(() => this.callEndedFired.delete(call.callId), 5_000);
   }
 
   /**

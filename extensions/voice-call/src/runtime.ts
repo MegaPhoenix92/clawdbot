@@ -2,6 +2,7 @@ import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
+import type { CallRecord } from "./types.js";
 import { resolveVoiceCallConfig, validateProviderConfig } from "./config.js";
 import { CallManager } from "./manager.js";
 import { MockProvider } from "./providers/mock.js";
@@ -96,8 +97,9 @@ export async function createVoiceCallRuntime(params: {
   coreConfig: CoreConfig;
   ttsRuntime?: TelephonyTtsRuntime;
   logger?: Logger;
+  onCallEnded?: (call: CallRecord) => void;
 }): Promise<VoiceCallRuntime> {
-  const { config: rawConfig, coreConfig, ttsRuntime, logger } = params;
+  const { config: rawConfig, coreConfig, ttsRuntime, logger, onCallEnded } = params;
   const log = logger ?? {
     info: console.log,
     warn: console.warn,
@@ -117,7 +119,7 @@ export async function createVoiceCallRuntime(params: {
   }
 
   const provider = resolveProvider(config);
-  const manager = new CallManager(config);
+  const manager = new CallManager(config, undefined, onCallEnded);
   const webhookServer = new VoiceCallWebhookServer(config, manager, provider, coreConfig);
 
   const localUrl = await webhookServer.start();

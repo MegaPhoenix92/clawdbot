@@ -1,8 +1,9 @@
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type {
+  CallRecord,
   HangupCallInput,
   InitiateCallInput,
   InitiateCallResult,
@@ -190,5 +191,148 @@ describe("CallManager", () => {
     });
 
     expect(manager.getCallByProviderCallId("provider-exact")).toBeDefined();
+  });
+
+  describe("onCallEnded callback", () => {
+    function createManager(cb: (call: CallRecord) => void) {
+      const config = VoiceCallConfigSchema.parse({
+        enabled: true,
+        provider: "plivo",
+        fromNumber: "+15550000000",
+      });
+      const storePath = path.join(os.tmpdir(), `openclaw-voice-call-test-${Date.now()}`);
+      const provider = new FakeProvider();
+      const manager = new CallManager(config, storePath, cb);
+      manager.initialize(provider, "https://example.com/voice/webhook");
+      return { manager, provider };
+    }
+
+    it("fires on call.ended webhook event", async () => {
+      const cb = vi.fn();
+      const { manager } = createManager(cb);
+      const { callId } = await manager.initiateCall("+15550000001");
+
+      manager.processEvent({
+        id: "evt-end-1",
+        type: "call.ended",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+        reason: "completed",
+      });
+
+      expect(cb).toHaveBeenCalledOnce();
+      expect(cb.mock.calls[0][0].callId).toBe(callId);
+      expect(cb.mock.calls[0][0].endReason).toBe("completed");
+    });
+
+    it("fires on non-retryable call.error", async () => {
+      const cb = vi.fn();
+      const { manager } = createManager(cb);
+      const { callId } = await manager.initiateCall("+15550000001");
+
+      manager.processEvent({
+        id: "evt-err-1",
+        type: "call.error",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+        error: "network failure",
+        retryable: false,
+      });
+
+      expect(cb).toHaveBeenCalledOnce();
+      expect(cb.mock.calls[0][0].callId).toBe(callId);
+      expect(cb.mock.calls[0][0].endReason).toBe("error");
+    });
+
+    it("does not fire on retryable call.error", async () => {
+      const cb = vi.fn();
+      const { manager } = createManager(cb);
+      const { callId } = await manager.initiateCall("+15550000001");
+
+      manager.processEvent({
+        id: "evt-err-retry",
+        type: "call.error",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+        error: "transient",
+        retryable: true,
+      });
+
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it("fires on endCall() (bot hangup path)", async () => {
+      const cb = vi.fn();
+      const { manager } = createManager(cb);
+      const { callId } = await manager.initiateCall("+15550000001");
+
+      // Move to answered so endCall can proceed
+      manager.processEvent({
+        id: "evt-ans-ec",
+        type: "call.answered",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+      });
+
+      const result = await manager.endCall(callId);
+      expect(result.success).toBe(true);
+      expect(cb).toHaveBeenCalledOnce();
+      expect(cb.mock.calls[0][0].endReason).toBe("hangup-bot");
+    });
+
+    it("fires exactly once even when endCall and call.ended both trigger", async () => {
+      const cb = vi.fn();
+      const { manager } = createManager(cb);
+      const { callId } = await manager.initiateCall("+15550000001");
+
+      // Answer the call
+      manager.processEvent({
+        id: "evt-ans-dup",
+        type: "call.answered",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+      });
+
+      // Bot hangup triggers callback
+      await manager.endCall(callId);
+      expect(cb).toHaveBeenCalledOnce();
+
+      // Provider then sends call.ended webhook — should NOT fire again
+      manager.processEvent({
+        id: "evt-end-dup",
+        type: "call.ended",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+        reason: "hangup-bot",
+      });
+
+      expect(cb).toHaveBeenCalledOnce();
+    });
+
+    it("does not throw when callback throws", async () => {
+      const cb = vi.fn(() => {
+        throw new Error("boom");
+      });
+      const { manager } = createManager(cb);
+      const { callId } = await manager.initiateCall("+15550000001");
+
+      // Should not throw despite callback error
+      manager.processEvent({
+        id: "evt-throw",
+        type: "call.ended",
+        callId,
+        providerCallId: "request-uuid",
+        timestamp: Date.now(),
+        reason: "completed",
+      });
+
+      expect(cb).toHaveBeenCalledOnce();
+    });
   });
 });

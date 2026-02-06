@@ -59,6 +59,7 @@ import {
   resolveStorePath,
   updateLastRoute,
 } from "../../config/sessions.js";
+import { resolveMainSessionKey } from "../../config/sessions/main-session.js";
 import { auditDiscordChannelPermissions } from "../../discord/audit.js";
 import {
   listDiscordDirectoryGroupsLive,
@@ -171,6 +172,7 @@ export function createPluginRuntime(): PluginRuntime {
     },
     system: {
       enqueueSystemEvent,
+      resolveMainSessionKey,
       runCommandWithTimeout,
       formatNativeDependencyHint,
     },
