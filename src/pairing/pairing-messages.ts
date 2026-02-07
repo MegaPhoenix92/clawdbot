@@ -15,6 +15,8 @@ export function buildPairingReply(params: {
     `Pairing code: ${code}`,
     "",
     "Ask the bot owner to approve with:",
-    formatCliCommand(`openclaw pairing approve ${channel} <code>`),
+    formatCliCommand(`phoenix pairing approve ${channel} <code>`),
+    "",
+    "Request Agentic agent services at https://trozlan.io",
   ].join("\n");
 }

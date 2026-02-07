@@ -53,6 +53,25 @@ if grep -q '"OpenClaw:' src/channels/plugins/helpers.ts 2>/dev/null; then
   sed -i '' 's/"OpenClaw:/"Phoenix:/g' src/channels/plugins/helpers.ts
 fi
 
+# 8. Pairing approve commands - user-facing CLI hints in messaging channels
+sed -i '' 's/openclaw pairing approve/phoenix pairing approve/g' \
+  src/pairing/pairing-messages.ts \
+  src/telegram/bot-message-context.ts \
+  extensions/matrix/src/matrix/monitor/handler.ts \
+  src/channels/plugins/helpers.ts \
+  src/feishu/message.ts \
+  extensions/line/src/channel.ts
+
+# 9. Pairing list commands - user-facing CLI hints
+sed -i '' 's/openclaw pairing list/phoenix pairing list/g' \
+  src/channels/plugins/helpers.ts
+
+# 10. Feishu branding
+sed -i '' 's/"OpenClaw access not configured\."/"Phoenix: access not configured."/g' \
+  src/feishu/message.ts
+sed -i '' 's/Ask the OpenClaw admin/Ask the Phoenix admin/g' \
+  src/feishu/message.ts
+
 echo "Phoenix rebranding complete!"
 echo ""
 echo "Files modified:"

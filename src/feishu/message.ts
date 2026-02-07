@@ -188,14 +188,14 @@ export async function processFeishuMessage(
                 senderId,
                 {
                   text: [
-                    "OpenClaw access not configured.",
+                    "Phoenix: access not configured.",
                     "",
                     `Your Feishu Open ID: ${senderId}`,
                     "",
                     `Pairing code: ${code}`,
                     "",
-                    "Ask the OpenClaw admin to approve with:",
-                    `openclaw pairing approve feishu ${code}`,
+                    "Ask the Phoenix admin to approve with:",
+                    `phoenix pairing approve feishu ${code}`,
                   ].join("\n"),
                 },
                 { receiveIdType: "open_id" },
