@@ -35,9 +35,9 @@ sed -i '' 's/alt="OpenClaw"/alt="Phoenix"/g' \
 sed -i '' 's/<div class="brand-title">OPENCLAW<\/div>/<div class="brand-title">PHOENIX<\/div>/g' \
   ui/src/ui/app-render.ts
 
-# 5b. Replace favicon with Phoenix logo
+# 5b. Replace favicon with Phoenix logo (basePath-aware pattern from v2026.2.9+)
 if [ -f "ui/public/phoenix-logo.png" ]; then
-  sed -i '' 's|src="/favicon.svg"|src="/phoenix-logo.png"|g' \
+  sed -i '' 's|/favicon\.svg|/phoenix-logo.png|g' \
     ui/src/ui/app-render.ts
   echo "  - Logo replaced with phoenix-logo.png"
 else
@@ -54,23 +54,17 @@ if grep -q '"OpenClaw:' src/channels/plugins/helpers.ts 2>/dev/null; then
 fi
 
 # 8. Pairing approve commands - user-facing CLI hints in messaging channels
+# Note: feishu moved to extensions/feishu/ in v2026.2.9 and no longer has inline pairing messages
 sed -i '' 's/openclaw pairing approve/phoenix pairing approve/g' \
   src/pairing/pairing-messages.ts \
   src/telegram/bot-message-context.ts \
   extensions/matrix/src/matrix/monitor/handler.ts \
   src/channels/plugins/helpers.ts \
-  src/feishu/message.ts \
   extensions/line/src/channel.ts
 
 # 9. Pairing list commands - user-facing CLI hints
 sed -i '' 's/openclaw pairing list/phoenix pairing list/g' \
   src/channels/plugins/helpers.ts
-
-# 10. Feishu branding
-sed -i '' 's/"OpenClaw access not configured\."/"Phoenix: access not configured."/g' \
-  src/feishu/message.ts
-sed -i '' 's/Ask the OpenClaw admin/Ask the Phoenix admin/g' \
-  src/feishu/message.ts
 
 echo "Phoenix rebranding complete!"
 echo ""
@@ -81,6 +75,7 @@ echo "  - extensions/matrix/src/matrix/monitor/handler.ts"
 echo "  - extensions/matrix/src/matrix/client/config.ts"
 echo "  - extensions/matrix/src/onboarding.ts"
 echo "  - ui/src/ui/app-render.ts"
-echo "  - ui/src/ui/app-gateway.ts"
+echo "  - src/channels/plugins/helpers.ts"
+echo "  - extensions/line/src/channel.ts"
 echo ""
 echo "Remember to rebuild the UI: pnpm build"
