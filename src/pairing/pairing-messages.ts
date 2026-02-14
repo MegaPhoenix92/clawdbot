@@ -8,15 +8,13 @@ export function buildPairingReply(params: {
 }): string {
   const { channel, idLine, code } = params;
   return [
-    "Phoenix: access not configured.",
+    "OpenClaw: access not configured.",
     "",
     idLine,
     "",
     `Pairing code: ${code}`,
     "",
     "Ask the bot owner to approve with:",
-    formatCliCommand(`phoenix pairing approve ${channel} <code>`),
-    "",
-    "Request Agentic agent services at https://trozlan.io",
+    formatCliCommand(`openclaw pairing approve ${channel} ${code}`),
   ].join("\n");
 }
