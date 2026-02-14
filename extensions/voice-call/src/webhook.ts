@@ -79,10 +79,14 @@ export class VoiceCallWebhookServer {
       shouldAcceptStream: ({ callId, token }) => {
         const call = this.manager.getCallByProviderCallId(callId);
         if (!call) {
+          console.warn(`[voice-call] Rejecting media stream: no call record for ${callId}`);
           return false;
         }
         if (this.provider.name === "twilio") {
           const twilio = this.provider as TwilioProvider;
+          console.log(
+            `[voice-call] Stream auth check: callId=${callId}, hasToken=${!!token}, tokenLen=${token?.length ?? 0}`,
+          );
           if (!twilio.isValidStreamToken(callId, token)) {
             console.warn(`[voice-call] Rejecting media stream: invalid token for ${callId}`);
             return false;
@@ -183,7 +187,7 @@ export class VoiceCallWebhookServer {
           const url = new URL(request.url || "/", `http://${request.headers.host}`);
 
           if (url.pathname === streamPath) {
-            console.log("[voice-call] WebSocket upgrade for media stream");
+            console.log(`[voice-call] WebSocket upgrade for media stream, url=${request.url}`);
             this.mediaStreamHandler?.handleUpgrade(request, socket, head);
           } else {
             socket.destroy();

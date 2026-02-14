@@ -8,7 +8,7 @@
 import type { WorkspaceBootstrapFile } from "../agents/workspace.js";
 import type { OpenClawConfig } from "../config/config.js";
 
-export type InternalHookEventType = "command" | "session" | "agent" | "gateway";
+export type InternalHookEventType = "command" | "session" | "agent" | "gateway" | "message";
 
 export type AgentBootstrapHookContext = {
   workspaceDir: string;
@@ -23,6 +23,23 @@ export type AgentBootstrapHookEvent = InternalHookEvent & {
   type: "agent";
   action: "bootstrap";
   context: AgentBootstrapHookContext;
+};
+
+export type InboundMessageHookContext = {
+  bodyForCommands: string;
+  senderId: string;
+  channel: string;
+  chatType?: string;
+  messageId?: string;
+  cfg?: OpenClawConfig;
+  skip?: boolean;
+  skipReason?: string;
+};
+
+export type InboundMessageHookEvent = InternalHookEvent & {
+  type: "message";
+  action: "inbound";
+  context: InboundMessageHookContext;
 };
 
 export interface InternalHookEvent {
@@ -178,4 +195,15 @@ export function isAgentBootstrapEvent(event: InternalHookEvent): event is AgentB
     return false;
   }
   return Array.isArray(context.bootstrapFiles);
+}
+
+export function isInboundMessageEvent(event: InternalHookEvent): event is InboundMessageHookEvent {
+  if (event.type !== "message" || event.action !== "inbound") {
+    return false;
+  }
+  const context = event.context as Partial<InboundMessageHookContext> | null;
+  if (!context || typeof context !== "object") {
+    return false;
+  }
+  return typeof context.bodyForCommands === "string" && typeof context.senderId === "string";
 }

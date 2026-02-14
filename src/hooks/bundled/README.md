@@ -60,6 +60,20 @@ Runs `BOOT.md` whenever the gateway starts (after channels start).
 openclaw hooks enable boot-md
 ```
 
+### 🚫 message-filter
+
+Filters out automated/junk inbound messages (OTP codes, marketing, reminders, etc.) so the agent doesn't respond.
+
+**Events**: `message:inbound`
+**What it does**: Tests inbound message body against regex patterns for 6 built-in categories (otp, marketing, appointments, fitness, delivery, banking) plus custom patterns. Sets `skip=true` on matched messages.
+**Opt-in**: Requires `enabled: true` in config. Does nothing by default.
+
+**Enable**:
+
+```bash
+openclaw hooks enable message-filter
+```
+
 ## Hook Structure
 
 Each hook is a directory containing:
@@ -170,8 +184,7 @@ Currently supported events:
 - **command:stop**: `/stop` command
 - **agent:bootstrap**: Before workspace bootstrap files are injected
 - **gateway:startup**: Gateway startup (after channels start)
-
-More event types coming soon (session lifecycle, agent errors, etc.).
+- **message:inbound**: Inbound message received (after deduplication, before model work)
 
 ## Handler API
 
@@ -179,7 +192,7 @@ Hook handlers receive an `InternalHookEvent` object:
 
 ```typescript
 interface InternalHookEvent {
-  type: "command" | "session" | "agent" | "gateway";
+  type: "command" | "session" | "agent" | "gateway" | "message";
   action: string; // e.g., 'new', 'reset', 'stop'
   sessionKey: string;
   context: Record<string, unknown>;

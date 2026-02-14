@@ -66,16 +66,47 @@ sed -i '' 's/openclaw pairing approve/phoenix pairing approve/g' \
 sed -i '' 's/openclaw pairing list/phoenix pairing list/g' \
   src/channels/plugins/helpers.ts
 
+# 10. Patch installed control-ui (the dashboard served by npx clawdbot gateway)
+#     The npm-installed package has pre-built UI assets that need patching too.
+CLAWDBOT_BIN="$(which clawdbot 2>/dev/null || echo "")"
+if [ -n "$CLAWDBOT_BIN" ]; then
+  CLAWDBOT_PKG="$(dirname "$(dirname "$(readlink -f "$CLAWDBOT_BIN" 2>/dev/null || realpath "$CLAWDBOT_BIN" 2>/dev/null || echo "")")")"
+  CONTROL_UI="$CLAWDBOT_PKG/dist/control-ui"
+else
+  # Fallback: look in common nvm location
+  CONTROL_UI=""
+  for NODE_DIR in /Users/chrisozsvath/.nvm/versions/node/*/lib/node_modules/clawdbot/dist/control-ui; do
+    if [ -f "$NODE_DIR/index.html" ]; then
+      CONTROL_UI="$NODE_DIR"
+      break
+    fi
+  done
+fi
+
+if [ -n "$CONTROL_UI" ] && [ -f "$CONTROL_UI/index.html" ]; then
+  echo "  - Patching installed control-ui at $CONTROL_UI"
+  # Replace CLAWDBOT with PHOENIX in bundled JS
+  for JS in "$CONTROL_UI"/assets/*.js; do
+    if [ -f "$JS" ]; then
+      sed -i '' 's/CLAWDBOT/PHOENIX/g' "$JS"
+      # Replace lobster CDN logo with local phoenix logo
+      sed -i '' 's|https://mintcdn\.com/clawdhub/[^"]*pixel-lobster[^"]*|./phoenix-logo.png|g' "$JS"
+    fi
+  done
+  # Update HTML title and favicon
+  sed -i '' 's/<title>Clawdbot Control<\/title>/<title>Phoenix Gateway<\/title>/' "$CONTROL_UI/index.html"
+  sed -i '' 's/<title>OpenClaw Control<\/title>/<title>Phoenix Gateway<\/title>/' "$CONTROL_UI/index.html"
+  sed -i '' 's|href="./favicon.ico"|href="./phoenix-logo.png" type="image/png"|' "$CONTROL_UI/index.html"
+  # Copy phoenix logo
+  if [ -f "ui/public/phoenix-logo.png" ]; then
+    cp ui/public/phoenix-logo.png "$CONTROL_UI/"
+  fi
+  echo "  - Control UI patched: PHOENIX branding + phoenix-logo.png"
+else
+  echo "  - WARNING: Could not find installed control-ui to patch"
+fi
+
+echo ""
 echo "Phoenix rebranding complete!"
 echo ""
-echo "Files modified:"
-echo "  - src/pairing/pairing-messages.ts"
-echo "  - src/telegram/bot-message-context.ts"
-echo "  - extensions/matrix/src/matrix/monitor/handler.ts"
-echo "  - extensions/matrix/src/matrix/client/config.ts"
-echo "  - extensions/matrix/src/onboarding.ts"
-echo "  - ui/src/ui/app-render.ts"
-echo "  - src/channels/plugins/helpers.ts"
-echo "  - extensions/line/src/channel.ts"
-echo ""
-echo "Remember to rebuild the UI: pnpm build"
+echo "Remember to rebuild: pnpm build"
