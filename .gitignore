@@ -84,3 +84,6 @@ USER.md
 !.agent/workflows/
 local/
 package-lock.json
+
+# TROZLAN-specific agent instructions (not for upstream)
+CLAUDE.md
