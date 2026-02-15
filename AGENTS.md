@@ -123,6 +123,14 @@
 
 - Rebrand/migration issues or legacy config/service warnings: run `openclaw doctor` (see `docs/gateway/doctor.md`).
 
+## App Update Persistence
+
+- `openclaw update`, `npm i -g openclaw@...`, and upstream merge/rebase flows can replace repo files and installed package files.
+- Keep persistent assistant behavior in the configured workspace (`agents.defaults.workspace`, default `~/.openclaw/workspace`), not in repo-root docs.
+- Persist long-lived instructions/preferences in workspace files: `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md` (plus `memory/*.md`).
+- Workspace bootstrap files are created only when missing (`writeFileIfMissing` with `flag: "wx"`), so existing workspace files are not overwritten by normal setup/update flows.
+- If you customize repo-root `AGENTS.md` / `CLAUDE.md`, treat them as repo-maintenance docs and keep them under version control; updates may change them.
+
 ## Agent-Specific Notes
 
 - Vocabulary: "makeup" = "mac app".

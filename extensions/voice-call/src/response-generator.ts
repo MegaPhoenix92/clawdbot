@@ -32,6 +32,39 @@ type SessionEntry = {
   updatedAt: number;
 };
 
+const DEFAULT_VOICE_RESPONSE_MAX_WORDS = 18;
+
+function stripMarkdownNoise(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_#~>]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Enforce concise phone-safe output even when the underlying model drifts verbose.
+ */
+export function clampVoiceResponseText(
+  raw: string,
+  maxWords = DEFAULT_VOICE_RESPONSE_MAX_WORDS,
+): string {
+  const normalized = stripMarkdownNoise(raw);
+  if (!normalized) {
+    return "";
+  }
+
+  const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
+  const words = firstSentence.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return firstSentence.trim();
+  }
+
+  return `${words.slice(0, maxWords).join(" ")}...`;
+}
+
 /**
  * Generate a voice response using the embedded Pi agent with full tool support.
  * Uses the same agent infrastructure as messaging for consistent behavior.
@@ -150,7 +183,12 @@ export async function generateVoiceResponse(
       return { text: null, error: "Response generation was aborted" };
     }
 
-    return { text };
+    if (!text) {
+      return { text };
+    }
+
+    const clampedText = clampVoiceResponseText(text);
+    return { text: clampedText || text };
   } catch (err) {
     console.error(`[voice-call] Response generation failed:`, err);
     return { text: null, error: String(err) };

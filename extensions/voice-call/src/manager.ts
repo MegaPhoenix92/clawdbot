@@ -13,6 +13,7 @@ import {
   initiateCall as initiateCallWithContext,
   speak as speakWithContext,
   speakInitialMessage as speakInitialMessageWithContext,
+  type SpeakOptions,
 } from "./manager/outbound.js";
 import { getCallHistoryFromStore, loadActiveCallsFromStore } from "./manager/store.js";
 import { resolveUserPath } from "./utils.js";
@@ -99,8 +100,12 @@ export class CallManager {
   /**
    * Speak to user in an active call.
    */
-  async speak(callId: CallId, text: string): Promise<{ success: boolean; error?: string }> {
-    return speakWithContext(this.getContext(), callId, text);
+  async speak(
+    callId: CallId,
+    text: string,
+    options?: SpeakOptions,
+  ): Promise<{ success: boolean; error?: string }> {
+    return speakWithContext(this.getContext(), callId, text, options);
   }
 
   /**

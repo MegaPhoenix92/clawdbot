@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { validateProviderConfig, resolveVoiceCallConfig, type VoiceCallConfig } from "./config.js";
+import {
+  VoiceCallConfigSchema,
+  validateProviderConfig,
+  resolveVoiceCallConfig,
+  type VoiceCallConfig,
+} from "./config.js";
 
 function createBaseConfig(provider: "telnyx" | "twilio" | "plivo" | "mock"): VoiceCallConfig {
   return {
@@ -35,6 +40,19 @@ function createBaseConfig(provider: "telnyx" | "twilio" | "plivo" | "mock"): Voi
     tts: { provider: "openai", model: "gpt-4o-mini-tts", voice: "coral" },
     responseModel: "openai/gpt-4o-mini",
     responseTimeoutMs: 30000,
+    responseCues: {
+      enabled: false,
+      acknowledgement: "Got it, checking now.",
+      progress: "Still working on that.",
+      progressDelayMs: 6000,
+    },
+    singleTopic: {
+      enabled: false,
+      minKeywords: 2,
+      warningMessage: "Let's keep this call focused on one topic.",
+      endCallOnDrift: false,
+      maxDriftCount: 2,
+    },
   };
 }
 
@@ -229,6 +247,85 @@ describe("validateProviderConfig", () => {
 
       expect(result.valid).toBe(true);
       expect(result.errors).toEqual([]);
+    });
+  });
+});
+
+describe("response cues config", () => {
+  it("applies response cue defaults", () => {
+    const parsed = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      fromNumber: "+15550001234",
+    });
+
+    expect(parsed.responseCues).toEqual({
+      enabled: false,
+      acknowledgement: "Got it, checking now.",
+      progress: "Still working on that.",
+      progressDelayMs: 6000,
+    });
+  });
+
+  it("accepts explicit response cue overrides", () => {
+    const parsed = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      fromNumber: "+15550001234",
+      responseCues: {
+        enabled: true,
+        acknowledgement: "One sec.",
+        progress: "Still working.",
+        progressDelayMs: 2500,
+      },
+    });
+
+    expect(parsed.responseCues).toEqual({
+      enabled: true,
+      acknowledgement: "One sec.",
+      progress: "Still working.",
+      progressDelayMs: 2500,
+    });
+  });
+});
+
+describe("single-topic config", () => {
+  it("applies single-topic defaults", () => {
+    const parsed = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      fromNumber: "+15550001234",
+    });
+
+    expect(parsed.singleTopic).toEqual({
+      enabled: false,
+      minKeywords: 2,
+      warningMessage: "Let's keep this call focused on one topic.",
+      endCallOnDrift: false,
+      maxDriftCount: 2,
+    });
+  });
+
+  it("accepts explicit single-topic overrides", () => {
+    const parsed = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      fromNumber: "+15550001234",
+      singleTopic: {
+        enabled: true,
+        minKeywords: 3,
+        warningMessage: "Please stick to one topic.",
+        endCallOnDrift: true,
+        maxDriftCount: 1,
+      },
+    });
+
+    expect(parsed.singleTopic).toEqual({
+      enabled: true,
+      minKeywords: 3,
+      warningMessage: "Please stick to one topic.",
+      endCallOnDrift: true,
+      maxDriftCount: 1,
     });
   });
 });

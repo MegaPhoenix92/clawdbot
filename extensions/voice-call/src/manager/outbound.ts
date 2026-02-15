@@ -50,6 +50,10 @@ type EndCallContext = Pick<
   | "maxDurationTimers"
 >;
 
+export type SpeakOptions = {
+  recordTranscript?: boolean;
+};
+
 export async function initiateCall(
   ctx: InitiateContext,
   to: string,
@@ -147,6 +151,7 @@ export async function speak(
   ctx: SpeakContext,
   callId: CallId,
   text: string,
+  options?: SpeakOptions,
 ): Promise<{ success: boolean; error?: string }> {
   const call = ctx.activeCalls.get(callId);
   if (!call) {
@@ -163,7 +168,9 @@ export async function speak(
     transitionState(call, "speaking");
     persistCallRecord(ctx.storePath, call);
 
-    addTranscriptEntry(call, "bot", text);
+    if (options?.recordTranscript !== false) {
+      addTranscriptEntry(call, "bot", text);
+    }
 
     const voice = ctx.provider?.name === "twilio" ? ctx.config.tts?.openai?.voice : undefined;
     await ctx.provider.playTts({

@@ -105,6 +105,15 @@ const voiceCallConfigSchema = {
     responseModel: { label: "Response Model", advanced: true },
     responseSystemPrompt: { label: "Response System Prompt", advanced: true },
     responseTimeoutMs: { label: "Response Timeout (ms)", advanced: true },
+    "responseCues.enabled": { label: "Enable Response Cues", advanced: true },
+    "responseCues.acknowledgement": { label: "Cue: Acknowledgement", advanced: true },
+    "responseCues.progress": { label: "Cue: Progress", advanced: true },
+    "responseCues.progressDelayMs": { label: "Cue: Progress Delay (ms)", advanced: true },
+    "singleTopic.enabled": { label: "Enable Single-Topic Guard", advanced: true },
+    "singleTopic.minKeywords": { label: "Single-Topic Min Keywords", advanced: true },
+    "singleTopic.warningMessage": { label: "Single-Topic Warning Message", advanced: true },
+    "singleTopic.endCallOnDrift": { label: "End Call On Topic Drift", advanced: true },
+    "singleTopic.maxDriftCount": { label: "Single-Topic Max Drift Count", advanced: true },
   },
 };
 

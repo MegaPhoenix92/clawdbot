@@ -106,6 +106,101 @@ else
   echo "  - WARNING: Could not find installed control-ui to patch"
 fi
 
+# 11. Patch installed dist user-facing messages (Clawdbot -> Phoenix)
+#     v2026.2.13+ upstream renamed OpenClaw to Clawdbot in compiled output.
+#     The gateway serves from installed dist, not local builds.
+if [ -n "$CLAWDBOT_PKG" ] && [ -d "$CLAWDBOT_PKG/dist" ]; then
+  DIST="$CLAWDBOT_PKG/dist"
+  echo "  - Patching installed dist at $DIST"
+
+  # "Clawdbot: access not configured." -> "Phoenix: access not configured."
+  for F in "$DIST/pairing/pairing-messages.js" "$DIST/telegram/bot-message-context.js"; do
+    [ -f "$F" ] && sed -i '' 's/"Clawdbot: access not configured\."/"Phoenix: access not configured."/g' "$F"
+  done
+
+  # "clawdbot pairing approve" -> "phoenix pairing approve"
+  for F in \
+    "$DIST/pairing/pairing-messages.js" \
+    "$DIST/telegram/bot-message-context.js" \
+    "$DIST/channels/plugins/helpers.js" \
+    "$DIST/cli/pairing-cli.js" \
+    "$DIST/commands/onboard-channels.js" \
+    "$DIST/commands/onboard-providers.js" \
+    "$DIST/providers/plugins/helpers.js"; do
+    [ -f "$F" ] && sed -i '' 's/clawdbot pairing approve/phoenix pairing approve/g' "$F"
+  done
+
+  # "clawdbot pairing list" -> "phoenix pairing list"
+  for F in "$DIST/channels/plugins/helpers.js" "$DIST/providers/plugins/helpers.js"; do
+    [ -f "$F" ] && sed -i '' 's/clawdbot pairing list/phoenix pairing list/g' "$F"
+  done
+
+  # Also patch any extension dist dirs
+  for EXT_DIST in "$CLAWDBOT_PKG/dist/extensions"/*/; do
+    if [ -d "$EXT_DIST" ]; then
+      for F in $(grep -rl '"Clawdbot:\|clawdbot pairing' "$EXT_DIST" 2>/dev/null); do
+        sed -i '' 's/"Clawdbot: access not configured\."/"Phoenix: access not configured."/g' "$F"
+        sed -i '' 's/clawdbot pairing approve/phoenix pairing approve/g' "$F"
+        sed -i '' 's/clawdbot pairing list/phoenix pairing list/g' "$F"
+      done
+    fi
+  done
+
+  echo "  - Dist patched: Phoenix branding in pairing/CLI messages"
+
+  # 12. Patch dispatch-from-config.js to emit message:inbound hook events
+  #     This enables the message-filter hook to intercept inbound messages.
+  DISPATCH="$DIST/auto-reply/reply/dispatch-from-config.js"
+  if [ -f "$DISPATCH" ]; then
+    # Only patch if not already patched
+    if ! grep -q 'message:inbound' "$DISPATCH" 2>/dev/null; then
+      # Add import for hook system
+      sed -i '' '/import.*tts\.js/a\
+import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
+' "$DISPATCH"
+
+      # Add filter logic after the dedupe check
+      sed -i '' '/return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };/{
+        # Only patch after the "duplicate" recordProcessed line
+        N
+        /duplicate/!b skip_patch
+        s/\(return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };\)/\1/
+        :skip_patch
+      }' "$DISPATCH" 2>/dev/null || true
+
+      # Simpler approach: use node to patch
+      node -e "
+        const fs = require('fs');
+        let code = fs.readFileSync('$DISPATCH', 'utf-8');
+        if (!code.includes('message:inbound')) {
+          // Add import
+          code = code.replace(
+            /import.*normalizeTtsAutoMode.*from.*tts\.js.*/,
+            match => match + '\nimport { createInternalHookEvent, triggerInternalHook } from \"../../hooks/internal-hooks.js\";'
+          );
+          // Add filter after dedupe
+          code = code.replace(
+            /(if \(shouldSkipDuplicateInbound\(ctx\)\) \{[^}]+\})/s,
+            '\$1\n' +
+            '    // message:inbound hook (message-filter)\n' +
+            '    const filterBody = typeof ctx.BodyForCommands === \"string\" ? ctx.BodyForCommands : typeof ctx.CommandBody === \"string\" ? ctx.CommandBody : typeof ctx.RawBody === \"string\" ? ctx.RawBody : typeof ctx.Body === \"string\" ? ctx.Body : \"\";\n' +
+            '    const filterContext = { bodyForCommands: filterBody, senderId: ctx.From ?? ctx.SenderId ?? \"\", channel, chatType: ctx.ChatType, messageId, cfg };\n' +
+            '    const filterEvent = createInternalHookEvent(\"message\", \"inbound\", sessionKey ?? \"\", filterContext);\n' +
+            '    await triggerInternalHook(filterEvent);\n' +
+            '    if (filterContext.skip === true) { recordProcessed(\"skipped\", { reason: filterContext.skipReason ?? \"message-filter\" }); return { queuedFinal: false, counts: dispatcher.getQueuedCounts() }; }'
+          );
+          fs.writeFileSync('$DISPATCH', code);
+          console.log('    - dispatch-from-config.js patched with message:inbound hook');
+        } else {
+          console.log('    - dispatch-from-config.js already patched');
+        }
+      "
+    else
+      echo "  - dispatch-from-config.js already has message:inbound hook"
+    fi
+  fi
+fi
+
 echo ""
 echo "Phoenix rebranding complete!"
 echo ""
