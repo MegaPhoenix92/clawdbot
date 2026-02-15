@@ -82,7 +82,7 @@ USER.md
 /memory/
 .agent/*.json
 !.agent/workflows/
-local/
+/local/
 package-lock.json
 
 # TROZLAN-specific agent instructions (not for upstream)
