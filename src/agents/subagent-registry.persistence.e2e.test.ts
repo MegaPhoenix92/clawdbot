@@ -10,7 +10,10 @@ import {
 } from "./subagent-registry.js";
 import { loadSubagentRegistryFromDisk } from "./subagent-registry.store.js";
 
-const noop = () => {};
+const { noop, announceSpy } = vi.hoisted(() => ({
+  noop: (() => {}) as () => void,
+  announceSpy: vi.fn(async () => true),
+}));
 
 vi.mock("../gateway/call.js", () => ({
   callGateway: vi.fn(async () => ({
@@ -24,7 +27,6 @@ vi.mock("../infra/agent-events.js", () => ({
   onAgentEvent: vi.fn(() => noop),
 }));
 
-const announceSpy = vi.fn(async () => true);
 vi.mock("./subagent-announce.js", () => ({
   runSubagentAnnounceFlow: announceSpy,
 }));
@@ -47,22 +49,25 @@ describe("subagent registry persistence", () => {
     childSessionKey: string;
     task: string;
     cleanup: "keep" | "delete";
-  }) => ({
-    version: 2,
-    runs: {
-      [params.runId]: {
-        runId: params.runId,
-        childSessionKey: params.childSessionKey,
-        requesterSessionKey: "agent:main:main",
-        requesterDisplayKey: "main",
-        task: params.task,
-        cleanup: params.cleanup,
-        createdAt: 1,
-        startedAt: 1,
-        endedAt: 2,
+  }) => {
+    const now = Date.now();
+    return {
+      version: 2,
+      runs: {
+        [params.runId]: {
+          runId: params.runId,
+          childSessionKey: params.childSessionKey,
+          requesterSessionKey: "agent:main:main",
+          requesterDisplayKey: "main",
+          task: params.task,
+          cleanup: params.cleanup,
+          createdAt: now - 2000,
+          startedAt: now - 1000,
+          endedAt: now - 500,
+        },
       },
-    },
-  });
+    };
+  };
 
   const restartRegistryAndFlush = async () => {
     resetSubagentRegistryForTests({ persist: false });

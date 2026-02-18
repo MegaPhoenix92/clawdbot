@@ -8,11 +8,10 @@
  * Never filters messages starting with "/" (command bypass).
  */
 
-import type { OpenClawConfig } from "../../../config/config.js";
-import type { HookHandler } from "../../hooks.js";
-import type { InboundMessageHookContext } from "../../internal-hooks.js";
 import { createSubsystemLogger } from "../../../logging/subsystem.js";
 import { resolveHookConfig } from "../../config.js";
+import type { HookHandler } from "../../hooks.js";
+import type { InboundMessageHookContext } from "../../internal-hooks.js";
 
 const log = createSubsystemLogger("hooks/message-filter");
 
