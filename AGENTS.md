@@ -227,7 +227,7 @@
   - skip if package is missing on npm or version already matches.
 - Keep `openclaw` untouched: never run publish from repo root unless explicitly requested.
 - Post-check for each release:
-  - per-plugin: `npm view @openclaw/<name> version --userconfig "$(mktemp)"` should be `2026.2.17`
+  - per-plugin: `npm view @openclaw/<name> version --userconfig "$(mktemp)"` should be `2026.2.19`
   - core guard: `npm view openclaw version --userconfig "$(mktemp)"` should stay at previous version unless explicitly requested.
 
 ## Changelog Release Notes
