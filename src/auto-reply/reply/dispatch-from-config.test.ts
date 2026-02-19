@@ -461,7 +461,8 @@ describe("dispatchReplyFromConfig", () => {
         messageId: "msg-42",
       }),
     );
-    expect(internalHookMocks.triggerInternalHook).toHaveBeenCalledTimes(1);
+    // Fork fires both message:inbound (pre-filter) and message:received (lifecycle)
+    expect(internalHookMocks.triggerInternalHook).toHaveBeenCalledTimes(2);
   });
 
   it("skips internal message:received hook when session key is unavailable", async () => {
@@ -478,8 +479,10 @@ describe("dispatchReplyFromConfig", () => {
     const replyResolver = async () => ({ text: "hi" }) satisfies ReplyPayload;
     await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver });
 
-    expect(internalHookMocks.createInternalHookEvent).not.toHaveBeenCalled();
-    expect(internalHookMocks.triggerInternalHook).not.toHaveBeenCalled();
+    // message:inbound still fires (pre-filter, no session key needed),
+    // but message:received is skipped (requires session key)
+    expect(internalHookMocks.createInternalHookEvent).toHaveBeenCalledTimes(1);
+    expect(internalHookMocks.triggerInternalHook).toHaveBeenCalledTimes(1);
   });
 
   it("emits diagnostics when enabled", async () => {
