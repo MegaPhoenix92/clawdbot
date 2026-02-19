@@ -164,8 +164,8 @@ const messageFilter: HookHandler = async (event) => {
   // Check built-in categories
   const categoryConfig = hookConfig.categories ?? {};
   for (const [category, patterns] of Object.entries(BUILTIN_CATEGORIES)) {
-    // Skip explicitly disabled categories (all enabled by default)
-    if (!categoryConfig[category]) {
+    // Skip explicitly disabled categories (all enabled by default when not mentioned)
+    if (categoryConfig[category] !== undefined && !categoryConfig[category]) {
       continue;
     }
 
