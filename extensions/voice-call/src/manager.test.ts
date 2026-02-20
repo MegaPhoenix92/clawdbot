@@ -482,4 +482,76 @@ describe("CallManager", () => {
     expect(provider.startListeningCalls).toHaveLength(5);
     expect(provider.stopListeningCalls).toHaveLength(5);
   });
+
+  it("fires onCallEnded callback when a call completes", async () => {
+    const config = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "plivo",
+      fromNumber: "+15550000000",
+    });
+
+    const storePath = path.join(os.tmpdir(), `openclaw-voice-call-test-${Date.now()}`);
+    const provider = new FakeProvider();
+    const endedCalls: { callId: string; direction: string }[] = [];
+    const manager = new CallManager(config, storePath, (call) => {
+      endedCalls.push({ callId: call.callId, direction: call.direction });
+    });
+    manager.initialize(provider, "https://example.com/voice/webhook");
+
+    const started = await manager.initiateCall("+15550000099");
+    expect(started.success).toBe(true);
+
+    manager.processEvent({
+      id: "evt-end-answered",
+      type: "call.answered",
+      callId: started.callId,
+      providerCallId: "request-uuid",
+      timestamp: Date.now(),
+    });
+
+    manager.processEvent({
+      id: "evt-end-completed",
+      type: "call.ended",
+      callId: started.callId,
+      providerCallId: "request-uuid",
+      timestamp: Date.now(),
+      reason: "hangup-user",
+    });
+
+    expect(endedCalls).toHaveLength(1);
+    expect(endedCalls[0].callId).toBe(started.callId);
+    expect(endedCalls[0].direction).toBe("outbound");
+  });
+
+  it("fires onCallEnded callback on bot hangup via endCall", async () => {
+    const config = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "plivo",
+      fromNumber: "+15550000000",
+    });
+
+    const storePath = path.join(os.tmpdir(), `openclaw-voice-call-test-${Date.now()}`);
+    const provider = new FakeProvider();
+    const endedCalls: string[] = [];
+    const manager = new CallManager(config, storePath, (call) => {
+      endedCalls.push(call.callId);
+    });
+    manager.initialize(provider, "https://example.com/voice/webhook");
+
+    const started = await manager.initiateCall("+15550000098");
+    expect(started.success).toBe(true);
+
+    manager.processEvent({
+      id: "evt-bot-hang-answered",
+      type: "call.answered",
+      callId: started.callId,
+      providerCallId: "request-uuid",
+      timestamp: Date.now(),
+    });
+
+    const result = await manager.endCall(started.callId);
+    expect(result.success).toBe(true);
+    expect(endedCalls).toHaveLength(1);
+    expect(endedCalls[0]).toBe(started.callId);
+  });
 });
