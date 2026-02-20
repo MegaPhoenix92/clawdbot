@@ -3,8 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import type { VoiceCallConfig } from "./config.js";
 import type { CallManagerContext } from "./manager/context.js";
-import type { VoiceCallProvider } from "./providers/base.js";
-import type { CallId, CallRecord, NormalizedEvent, OutboundCallOptions } from "./types.js";
 import { processEvent as processManagerEvent } from "./manager/events.js";
 import { getCallByProviderCallId as getCallByProviderCallIdFromMaps } from "./manager/lookup.js";
 import {
@@ -16,6 +14,8 @@ import {
   type SpeakOptions,
 } from "./manager/outbound.js";
 import { getCallHistoryFromStore, loadActiveCallsFromStore } from "./manager/store.js";
+import type { VoiceCallProvider } from "./providers/base.js";
+import type { CallId, CallRecord, NormalizedEvent, OutboundCallOptions } from "./types.js";
 import { resolveUserPath } from "./utils.js";
 
 function resolveDefaultStoreBase(config: VoiceCallConfig, storePath?: string): string {
@@ -58,10 +58,16 @@ export class CallManager {
     }
   >();
   private maxDurationTimers = new Map<CallId, NodeJS.Timeout>();
+  private onCallEnded?: (call: CallRecord) => void;
 
-  constructor(config: VoiceCallConfig, storePath?: string) {
+  constructor(
+    config: VoiceCallConfig,
+    storePath?: string,
+    onCallEnded?: (call: CallRecord) => void,
+  ) {
     this.config = config;
     this.storePath = resolveDefaultStoreBase(config, storePath);
+    this.onCallEnded = onCallEnded;
   }
 
   /**
@@ -149,6 +155,7 @@ export class CallManager {
       onCallAnswered: (call) => {
         this.maybeSpeakInitialMessageOnAnswered(call);
       },
+      onCallEnded: this.onCallEnded,
     };
   }
 

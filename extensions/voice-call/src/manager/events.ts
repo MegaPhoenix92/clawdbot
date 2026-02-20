@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
+import { isAllowlistedCaller, normalizePhoneNumber } from "../allowlist.js";
 import type { CallRecord, CallState, NormalizedEvent } from "../types.js";
 import type { CallManagerContext } from "./context.js";
-import { isAllowlistedCaller, normalizePhoneNumber } from "../allowlist.js";
 import { findCall } from "./lookup.js";
 import { endCall } from "./outbound.js";
 import { addTranscriptEntry, transitionState } from "./state.js";
@@ -25,6 +25,7 @@ type EventContext = Pick<
   | "transcriptWaiters"
   | "maxDurationTimers"
   | "onCallAnswered"
+  | "onCallEnded"
 >;
 
 function shouldAcceptInbound(config: EventContext["config"], from: string | undefined): boolean {
@@ -208,6 +209,11 @@ export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
       if (call.providerCallId) {
         ctx.providerCallIdMap.delete(call.providerCallId);
       }
+      try {
+        ctx.onCallEnded?.(call);
+      } catch (err) {
+        console.error("[voice-call] onCallEnded callback error:", err);
+      }
       break;
 
     case "call.error":
@@ -220,6 +226,11 @@ export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
         ctx.activeCalls.delete(call.callId);
         if (call.providerCallId) {
           ctx.providerCallIdMap.delete(call.providerCallId);
+        }
+        try {
+          ctx.onCallEnded?.(call);
+        } catch (err) {
+          console.error("[voice-call] onCallEnded callback error:", err);
         }
       }
       break;

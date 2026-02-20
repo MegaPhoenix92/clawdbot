@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import type { CallMode } from "../config.js";
-import type { CallManagerContext } from "./context.js";
 import {
   TerminalStates,
   type CallId,
@@ -8,6 +7,7 @@ import {
   type OutboundCallOptions,
 } from "../types.js";
 import { mapVoiceToPolly } from "../voice-mapping.js";
+import type { CallManagerContext } from "./context.js";
 import { getCallByProviderCallId } from "./lookup.js";
 import { addTranscriptEntry, transitionState } from "./state.js";
 import { persistCallRecord } from "./store.js";
@@ -49,6 +49,7 @@ type EndCallContext = Pick<
   | "storePath"
   | "transcriptWaiters"
   | "maxDurationTimers"
+  | "onCallEnded"
 >;
 
 export type SpeakOptions = {
@@ -338,6 +339,12 @@ export async function endCall(
     ctx.activeCalls.delete(callId);
     if (call.providerCallId) {
       ctx.providerCallIdMap.delete(call.providerCallId);
+    }
+
+    try {
+      ctx.onCallEnded?.(call);
+    } catch (cbErr) {
+      console.error("[voice-call] onCallEnded callback error:", cbErr);
     }
 
     return { success: true };
