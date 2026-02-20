@@ -230,6 +230,14 @@
   - per-plugin: `npm view @openclaw/<name> version --userconfig "$(mktemp)"` should be `2026.2.19`
   - core guard: `npm view openclaw version --userconfig "$(mktemp)"` should stay at previous version unless explicitly requested.
 
+## Repo Sync (clawdbot / phoenix)
+
+- This repo (clawdbot) is the **source of truth** for all fork-local modifications to upstream code.
+- The sibling `phoenix/` repo extends clawdbot with ML features and cherry-picks from here.
+- **Never cherry-pick from phoenix back to clawdbot** -- phoenix contains ML-specific code.
+- All fork-local fixes go here first, then flow to phoenix.
+- See `CLAUDE.md` "Sibling Repo: phoenix/" section for full details.
+
 ## Changelog Release Notes
 
 - When cutting a mac release with beta GitHub prerelease:

@@ -273,6 +273,36 @@ origin    git@github.com:MegaPhoenix92/clawdbot.git
 upstream  git@github.com:openclaw/openclaw.git
 ```
 
-## Sibling Repo
+## Sibling Repo: phoenix/
 
-The `phoenix/` sibling repo at `/Users/chrisozsvath/Projects/TROZLAN/TROZLANIO/phoenix` is a parallel fork of the same upstream, used for source-level builds. Keep both repos in sync when updating.
+The `phoenix/` sibling repo at `/Users/chrisozsvath/Projects/TROZLAN/TROZLANIO/phoenix` extends clawdbot with ML features and Founder Model convergence.
+
+### Sync Direction: clawdbot --> phoenix (never reverse)
+
+- **All fork-local modifications** (bug fixes, hooks, extension tweaks) should be committed to **clawdbot FIRST**
+- phoenix cherry-picks or merges from clawdbot
+- **Never cherry-pick from phoenix back to clawdbot** -- phoenix contains ML-specific code that does not belong here
+
+### What Lives Where
+
+| Content                              | Repo         | Notes                                        |
+| ------------------------------------ | ------------ | -------------------------------------------- |
+| Upstream merges (openclaw releases)  | clawdbot     | Merged here first, then flows to phoenix     |
+| Fork-local fixes (hooks, extensions) | clawdbot     | Canonical location; cherry-picked to phoenix |
+| Rebrand script + branding            | clawdbot     | Shared; phoenix inherits                     |
+| ML pipeline / memory types           | phoenix only | Never comes back to clawdbot                 |
+| Confidence scoring                   | phoenix only | ML-specific feature                          |
+| Founder Model convergence            | phoenix only | Phoenix-specific architecture                |
+| Voice call ML extensions             | phoenix only | Extends base voice-call from clawdbot        |
+
+### On Upstream Release
+
+1. Update clawdbot: `git fetch upstream --tags && git merge v<YYYY.M.D>`
+2. Rebrand, install, build, test
+3. Notify/sync phoenix: phoenix pulls from clawdbot after clawdbot is stable
+
+### On Fork-Local Fix
+
+1. Commit here in clawdbot with clear commit message
+2. Test in clawdbot
+3. Cherry-pick to phoenix: `cd ../phoenix && git cherry-pick <sha>`
