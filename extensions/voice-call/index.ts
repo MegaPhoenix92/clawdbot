@@ -105,15 +105,6 @@ const voiceCallConfigSchema = {
     responseModel: { label: "Response Model", advanced: true },
     responseSystemPrompt: { label: "Response System Prompt", advanced: true },
     responseTimeoutMs: { label: "Response Timeout (ms)", advanced: true },
-    "responseCues.enabled": { label: "Enable Response Cues", advanced: true },
-    "responseCues.acknowledgement": { label: "Cue: Acknowledgement", advanced: true },
-    "responseCues.progress": { label: "Cue: Progress", advanced: true },
-    "responseCues.progressDelayMs": { label: "Cue: Progress Delay (ms)", advanced: true },
-    "singleTopic.enabled": { label: "Enable Single-Topic Guard", advanced: true },
-    "singleTopic.minKeywords": { label: "Single-Topic Min Keywords", advanced: true },
-    "singleTopic.warningMessage": { label: "Single-Topic Warning Message", advanced: true },
-    "singleTopic.endCallOnDrift": { label: "End Call On Topic Drift", advanced: true },
-    "singleTopic.maxDriftCount": { label: "Single-Topic Max Drift Count", advanced: true },
   },
 };
 
@@ -178,8 +169,10 @@ const voiceCallPlugin = {
     let mainSessionKey = "agent:main:main";
     try {
       mainSessionKey = api.runtime.system.resolveMainSessionKey(api.config);
-    } catch {
-      // Keep the default.
+    } catch (err) {
+      api.logger.warn(
+        `[voice-call] resolveMainSessionKey failed, using default: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     // Max transcript lines/chars to inject as a system event to avoid bloating prompts.
@@ -195,7 +188,7 @@ const voiceCallPlugin = {
       const durationStr =
         duration != null ? `${Math.floor(duration / 60)}m ${duration % 60}s` : "unknown";
 
-      let lines = call.transcript
+      const lines = call.transcript
         .map((e) => `${e.speaker === "bot" ? "You" : "Caller"}: ${e.text}`)
         .slice(-MAX_TRANSCRIPT_LINES);
 
@@ -204,9 +197,13 @@ const voiceCallPlugin = {
         body = `…${body.slice(-MAX_TRANSCRIPT_CHARS)}`;
       }
 
-      const text = `Voice call ended (${call.direction}, from ${call.from}, duration: ${durationStr}):\n${body}`;
+      const maskedFrom = call.from.length > 4 ? `***${call.from.slice(-4)}` : "***";
+      const text = `Voice call ended (${call.direction}, from ${maskedFrom}, duration: ${durationStr}):\n${body}`;
       try {
-        api.runtime.system.enqueueSystemEvent(text, { sessionKey: mainSessionKey });
+        api.runtime.system.enqueueSystemEvent(text, {
+          sessionKey: mainSessionKey,
+          contextKey: "voice-call-transcript",
+        });
       } catch (err) {
         api.logger.warn(
           `[voice-call] Failed to bridge transcript: ${err instanceof Error ? err.message : String(err)}`,

@@ -212,7 +212,10 @@ export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
       try {
         ctx.onCallEnded?.(call);
       } catch (err) {
-        console.error("[voice-call] onCallEnded callback error:", err);
+        console.error(
+          "[voice-call] onCallEnded callback error:",
+          err instanceof Error ? err.message : String(err),
+        );
       }
       break;
 
@@ -230,7 +233,10 @@ export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
         try {
           ctx.onCallEnded?.(call);
         } catch (err) {
-          console.error("[voice-call] onCallEnded callback error:", err);
+          console.error(
+            "[voice-call] onCallEnded callback error:",
+            err instanceof Error ? err.message : String(err),
+          );
         }
       }
       break;

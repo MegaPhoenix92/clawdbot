@@ -344,7 +344,10 @@ export async function endCall(
     try {
       ctx.onCallEnded?.(call);
     } catch (cbErr) {
-      console.error("[voice-call] onCallEnded callback error:", cbErr);
+      console.error(
+        "[voice-call] onCallEnded callback error:",
+        cbErr instanceof Error ? cbErr.message : String(cbErr),
+      );
     }
 
     return { success: true };
