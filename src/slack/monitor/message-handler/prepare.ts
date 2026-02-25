@@ -1,7 +1,3 @@
-import type { FinalizedMsgContext } from "../../../auto-reply/templating.js";
-import type { ResolvedSlackAccount } from "../../accounts.js";
-import type { SlackMessageEvent } from "../../types.js";
-import type { PreparedSlackMessage } from "./types.js";
 import { resolveAckReaction } from "../../../agents/identity.js";
 import { hasControlCommand } from "../../../auto-reply/command-detection.js";
 import { shouldHandleTextCommands } from "../../../auto-reply/commands-registry.js";
@@ -18,6 +14,7 @@ import {
   buildMentionRegexes,
   matchesMentionWithExplicit,
 } from "../../../auto-reply/reply/mentions.js";
+import type { FinalizedMsgContext } from "../../../auto-reply/templating.js";
 import {
   shouldAckReaction as shouldAckReactionGate,
   type AckReactionScope,
@@ -35,9 +32,11 @@ import { buildPairingReply } from "../../../pairing/pairing-messages.js";
 import { upsertChannelPairingRequest } from "../../../pairing/pairing-store.js";
 import { resolveAgentRoute } from "../../../routing/resolve-route.js";
 import { resolveThreadSessionKeys } from "../../../routing/session-key.js";
+import type { ResolvedSlackAccount } from "../../accounts.js";
 import { reactSlackMessage } from "../../actions.js";
 import { sendMessageSlack } from "../../send.js";
 import { resolveSlackThreadContext } from "../../threading.js";
+import type { SlackMessageEvent } from "../../types.js";
 import { resolveSlackAllowListMatch, resolveSlackUserAllowed } from "../allow-list.js";
 import { resolveSlackEffectiveAllowFrom } from "../auth.js";
 import { resolveSlackChannelConfig } from "../channel-config.js";
@@ -50,6 +49,7 @@ import {
   resolveSlackThreadStarter,
 } from "../media.js";
 import { resolveSlackRoomContextHints } from "../room-context.js";
+import type { PreparedSlackMessage } from "./types.js";
 
 export async function prepareSlackMessage(params: {
   ctx: SlackMonitorContext;
@@ -142,6 +142,7 @@ export async function prepareSlackMessage(params: {
       const allowMatch = resolveSlackAllowListMatch({
         allowList: allowFromLower,
         id: directUserId,
+        allowNameMatching: ctx.allowNameMatching,
       });
       const allowMatchMeta = formatAllowlistMatchMeta(allowMatch);
       if (!allowMatch.allowed) {
@@ -244,6 +245,7 @@ export async function prepareSlackMessage(params: {
         allowList: channelConfig?.users,
         userId: senderId,
         userName: senderName,
+        allowNameMatching: ctx.allowNameMatching,
       })
     : true;
   if (isRoom && !channelUserAuthorized) {
@@ -263,6 +265,7 @@ export async function prepareSlackMessage(params: {
     allowList: allowFromLower,
     id: senderId,
     name: senderName,
+    allowNameMatching: ctx.allowNameMatching,
   }).allowed;
   const channelUsersAllowlistConfigured =
     isRoom && Array.isArray(channelConfig?.users) && channelConfig.users.length > 0;
@@ -272,6 +275,7 @@ export async function prepareSlackMessage(params: {
           allowList: channelConfig?.users,
           userId: senderId,
           userName: senderName,
+          allowNameMatching: ctx.allowNameMatching,
         })
       : false;
   const commandGate = resolveControlCommandGate({
@@ -521,7 +525,7 @@ export async function prepareSlackMessage(params: {
       storePath,
       sessionKey, // Thread-specific session key
     });
-    if (threadInitialHistoryLimit > 0 && !threadSessionPreviousTimestamp) {
+    if (threadInitialHistoryLimit > 0) {
       const threadHistory = await resolveSlackThreadHistory({
         channelId: message.channel,
         threadTs,
@@ -642,6 +646,7 @@ export async function prepareSlackMessage(params: {
           channel: "slack",
           to: `user:${message.user}`,
           accountId: route.accountId,
+          threadId: threadContext.messageThreadId,
         }
       : undefined,
     onRecordError: (err) => {

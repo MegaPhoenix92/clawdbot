@@ -10,16 +10,16 @@ import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { CallManager } from "./manager.js";
 import type { MediaStreamConfig } from "./media-stream.js";
-import type { VoiceCallProvider } from "./providers/base.js";
-import type { TwilioProvider } from "./providers/twilio.js";
-import type { NormalizedEvent, WebhookContext } from "./types.js";
 import { MediaStreamHandler } from "./media-stream.js";
+import type { VoiceCallProvider } from "./providers/base.js";
 import { OpenAIRealtimeSTTProvider } from "./providers/stt-openai-realtime.js";
+import type { TwilioProvider } from "./providers/twilio.js";
 import {
   createVoiceCallResponseCueController,
   resolveVoiceCallResponseCuePlan,
   type VoiceCallResponseCueKind,
 } from "./response-cues.js";
+import type { NormalizedEvent, WebhookContext } from "./types.js";
 
 const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
 
@@ -277,6 +277,10 @@ export class VoiceCallWebhookServer {
 
     const streamConfig: MediaStreamConfig = {
       sttProvider,
+      preStartTimeoutMs: this.config.streaming?.preStartTimeoutMs,
+      maxPendingConnections: this.config.streaming?.maxPendingConnections,
+      maxPendingConnectionsPerIp: this.config.streaming?.maxPendingConnectionsPerIp,
+      maxConnections: this.config.streaming?.maxConnections,
       shouldAcceptStream: ({ callId, token }) => {
         const call = this.manager.getCallByProviderCallId(callId);
         if (!call) {
@@ -411,10 +415,9 @@ export class VoiceCallWebhookServer {
       // Handle WebSocket upgrades for media streams
       if (this.mediaStreamHandler) {
         this.server.on("upgrade", (request, socket, head) => {
-          const url = new URL(request.url || "/", `http://${request.headers.host}`);
-
-          if (url.pathname === streamPath) {
-            console.log(`[voice-call] WebSocket upgrade for media stream, url=${request.url}`);
+          const path = this.getUpgradePathname(request);
+          if (path === streamPath) {
+            console.log("[voice-call] WebSocket upgrade for media stream");
             this.mediaStreamHandler?.handleUpgrade(request, socket, head);
           } else {
             socket.destroy();
@@ -488,6 +491,15 @@ export class VoiceCallWebhookServer {
     });
   }
 
+  private getUpgradePathname(request: http.IncomingMessage): string | null {
+    try {
+      const host = request.headers.host || "localhost";
+      return new URL(request.url || "/", `http://${host}`).pathname;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Handle incoming HTTP request.
    */
@@ -553,22 +565,26 @@ export class VoiceCallWebhookServer {
     const result = this.provider.parseWebhookEvent(ctx);
 
     // Process each event
-    for (const event of result.events) {
-      const callBeforeEvent =
-        (event.providerCallId
-          ? this.manager.getCallByProviderCallId(event.providerCallId)
-          : undefined) ?? this.manager.getCall(event.callId);
+    if (verification.isReplay) {
+      console.warn("[voice-call] Replay detected; skipping event side effects");
+    } else {
+      for (const event of result.events) {
+        const callBeforeEvent =
+          (event.providerCallId
+            ? this.manager.getCallByProviderCallId(event.providerCallId)
+            : undefined) ?? this.manager.getCall(event.callId);
 
-      try {
-        this.manager.processEvent(event);
-      } catch (err) {
-        console.error(`[voice-call] Error processing event ${event.type}:`, err);
-      }
+        try {
+          this.manager.processEvent(event);
+        } catch (err) {
+          console.error(`[voice-call] Error processing event ${event.type}:`, err);
+        }
 
-      if (event.type === "call.ended" || (event.type === "call.error" && !event.retryable)) {
-        const terminalCallId = callBeforeEvent?.callId ?? event.callId;
-        this.markResponseDisconnected(terminalCallId);
-        this.clearSingleTopicState(terminalCallId);
+        if (event.type === "call.ended" || (event.type === "call.error" && !event.retryable)) {
+          const terminalCallId = callBeforeEvent?.callId ?? event.callId;
+          this.markResponseDisconnected(terminalCallId);
+          this.clearSingleTopicState(terminalCallId);
+        }
       }
     }
 
