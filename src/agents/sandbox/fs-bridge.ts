@@ -1,8 +1,7 @@
-import {
-  assertNoPathAliasEscape,
-  PATH_ALIAS_POLICIES,
-  type PathAliasPolicy,
-} from "../../infra/path-alias-guards.js";
+import fs from "node:fs";
+import { openBoundaryFile } from "../../infra/boundary-file-read.js";
+import { PATH_ALIAS_POLICIES, type PathAliasPolicy } from "../../infra/path-alias-guards.js";
+import type { SafeOpenSyncAllowedType } from "../../infra/safe-open-sync.js";
 import { execDockerRaw, type ExecDockerRawResult } from "./docker.js";
 import {
   buildSandboxFsMounts,
@@ -24,6 +23,7 @@ type PathSafetyOptions = {
   action: string;
   aliasPolicy?: PathAliasPolicy;
   requireWritable?: boolean;
+  allowedType?: SafeOpenSyncAllowedType;
 };
 
 export type SandboxResolvedPath = {
@@ -133,7 +133,11 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
   async mkdirp(params: { filePath: string; cwd?: string; signal?: AbortSignal }): Promise<void> {
     const target = this.resolveResolvedPath(params);
     this.ensureWriteAccess(target, "create directories");
-    await this.assertPathSafety(target, { action: "create directories", requireWritable: true });
+    await this.assertPathSafety(target, {
+      action: "create directories",
+      requireWritable: true,
+      allowedType: "directory",
+    });
     await this.runCommand('set -eu; mkdir -p -- "$1"', {
       args: [target.containerPath],
       signal: params.signal,
@@ -254,12 +258,24 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
       );
     }
 
-    await assertNoPathAliasEscape({
+    const guarded = await openBoundaryFile({
       absolutePath: target.hostPath,
       rootPath: lexicalMount.hostRoot,
       boundaryLabel: "sandbox mount root",
-      policy: options.aliasPolicy,
+      aliasPolicy: options.aliasPolicy,
+      allowedType: options.allowedType,
     });
+    if (!guarded.ok) {
+      if (guarded.reason !== "path") {
+        throw guarded.error instanceof Error
+          ? guarded.error
+          : new Error(
+              `Sandbox boundary checks failed; cannot ${options.action}: ${target.containerPath}`,
+            );
+      }
+    } else {
+      fs.closeSync(guarded.fd);
+    }
 
     const canonicalContainerPath = await this.resolveCanonicalContainerPath({
       containerPath: target.containerPath,
