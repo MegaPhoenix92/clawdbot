@@ -3,8 +3,9 @@ import {
   TtsConfigSchema,
   TtsModeSchema,
   TtsProviderSchema,
-} from "openclaw/plugin-sdk";
+} from "openclaw/plugin-sdk/voice-call";
 import { z } from "zod";
+import { deepMergeDefined } from "./deep-merge.js";
 
 // -----------------------------------------------------------------------------
 // Phone Number Validation
@@ -247,57 +248,6 @@ export const VoiceCallStreamingConfigSchema = z
 export type VoiceCallStreamingConfig = z.infer<typeof VoiceCallStreamingConfigSchema>;
 
 // -----------------------------------------------------------------------------
-// Voice Response Cues (optional conversational acknowledgements)
-// -----------------------------------------------------------------------------
-
-export const VoiceCallResponseCuesConfigSchema = z
-  .object({
-    /** Enable spoken acknowledgement/progress cues during response generation */
-    enabled: z.boolean().default(false),
-    /** Immediate acknowledgement phrase (set empty string to disable) */
-    acknowledgement: z.string().default("Got it, checking now."),
-    /** Optional progress phrase for longer-running tool/model turns (empty disables) */
-    progress: z.string().default("Still working on that."),
-    /** Delay before progress cue is spoken (ms) */
-    progressDelayMs: z.number().int().nonnegative().default(6000),
-  })
-  .strict()
-  .default({
-    enabled: false,
-    acknowledgement: "Got it, checking now.",
-    progress: "Still working on that.",
-    progressDelayMs: 6000,
-  });
-export type VoiceCallResponseCuesConfig = z.infer<typeof VoiceCallResponseCuesConfigSchema>;
-
-// -----------------------------------------------------------------------------
-// Single-Topic Conversation Guard (optional)
-// -----------------------------------------------------------------------------
-
-export const VoiceCallSingleTopicConfigSchema = z
-  .object({
-    /** Enable a single-topic lock per call to avoid abrupt topic pivots */
-    enabled: z.boolean().default(false),
-    /** Minimum extracted keywords needed before drift detection is applied */
-    minKeywords: z.number().int().positive().default(2),
-    /** Spoken warning when caller pivots away from the established topic (empty disables) */
-    warningMessage: z.string().default("Let's keep this call focused on one topic."),
-    /** End the call after repeated topic drift */
-    endCallOnDrift: z.boolean().default(false),
-    /** Number of drift detections before ending call when endCallOnDrift=true */
-    maxDriftCount: z.number().int().positive().default(2),
-  })
-  .strict()
-  .default({
-    enabled: false,
-    minKeywords: 2,
-    warningMessage: "Let's keep this call focused on one topic.",
-    endCallOnDrift: false,
-    maxDriftCount: 2,
-  });
-export type VoiceCallSingleTopicConfig = z.infer<typeof VoiceCallSingleTopicConfigSchema>;
-
-// -----------------------------------------------------------------------------
 // Main Voice Call Configuration
 // -----------------------------------------------------------------------------
 
@@ -397,27 +347,68 @@ export const VoiceCallConfigSchema = z
 
     /** Timeout for response generation in ms (default 30s) */
     responseTimeoutMs: z.number().int().positive().default(30000),
-
-    /** Optional spoken acknowledgement/progress cues during long turns */
-    responseCues: VoiceCallResponseCuesConfigSchema,
-
-    /** Optional single-topic guard to prevent rapid unrelated pivots */
-    singleTopic: VoiceCallSingleTopicConfigSchema,
   })
   .strict();
 
 export type VoiceCallConfig = z.infer<typeof VoiceCallConfigSchema>;
+type DeepPartial<T> =
+  T extends Array<infer U>
+    ? DeepPartial<U>[]
+    : T extends object
+      ? { [K in keyof T]?: DeepPartial<T[K]> }
+      : T;
+export type VoiceCallConfigInput = DeepPartial<VoiceCallConfig>;
 
 // -----------------------------------------------------------------------------
 // Configuration Helpers
 // -----------------------------------------------------------------------------
 
+const DEFAULT_VOICE_CALL_CONFIG = VoiceCallConfigSchema.parse({});
+
+function cloneDefaultVoiceCallConfig(): VoiceCallConfig {
+  return structuredClone(DEFAULT_VOICE_CALL_CONFIG);
+}
+
+function normalizeVoiceCallTtsConfig(
+  defaults: VoiceCallTtsConfig,
+  overrides: DeepPartial<NonNullable<VoiceCallTtsConfig>> | undefined,
+): VoiceCallTtsConfig {
+  if (!defaults && !overrides) {
+    return undefined;
+  }
+
+  return TtsConfigSchema.parse(deepMergeDefined(defaults ?? {}, overrides ?? {}));
+}
+
+export function normalizeVoiceCallConfig(config: VoiceCallConfigInput): VoiceCallConfig {
+  const defaults = cloneDefaultVoiceCallConfig();
+  return {
+    ...defaults,
+    ...config,
+    allowFrom: config.allowFrom ?? defaults.allowFrom,
+    outbound: { ...defaults.outbound, ...config.outbound },
+    serve: { ...defaults.serve, ...config.serve },
+    tailscale: { ...defaults.tailscale, ...config.tailscale },
+    tunnel: { ...defaults.tunnel, ...config.tunnel },
+    webhookSecurity: {
+      ...defaults.webhookSecurity,
+      ...config.webhookSecurity,
+      allowedHosts: config.webhookSecurity?.allowedHosts ?? defaults.webhookSecurity.allowedHosts,
+      trustedProxyIPs:
+        config.webhookSecurity?.trustedProxyIPs ?? defaults.webhookSecurity.trustedProxyIPs,
+    },
+    streaming: { ...defaults.streaming, ...config.streaming },
+    stt: { ...defaults.stt, ...config.stt },
+    tts: normalizeVoiceCallTtsConfig(defaults.tts, config.tts),
+  };
+}
+
 /**
  * Resolves the configuration by merging environment variables into missing fields.
  * Returns a new configuration object with environment variables applied.
  */
-export function resolveVoiceCallConfig(config: VoiceCallConfig): VoiceCallConfig {
-  const resolved = JSON.parse(JSON.stringify(config)) as VoiceCallConfig;
+export function resolveVoiceCallConfig(config: VoiceCallConfigInput): VoiceCallConfig {
+  const resolved = normalizeVoiceCallConfig(config);
 
   // Telnyx
   if (resolved.provider === "telnyx") {
@@ -462,16 +453,7 @@ export function resolveVoiceCallConfig(config: VoiceCallConfig): VoiceCallConfig
     resolved.webhookSecurity.trustForwardingHeaders ?? false;
   resolved.webhookSecurity.trustedProxyIPs = resolved.webhookSecurity.trustedProxyIPs ?? [];
 
-  // Single-topic guard config
-  resolved.singleTopic = resolved.singleTopic ?? {
-    enabled: false,
-    minKeywords: 2,
-    warningMessage: "Let's keep this call focused on one topic.",
-    endCallOnDrift: false,
-    maxDriftCount: 2,
-  };
-
-  return resolved;
+  return normalizeVoiceCallConfig(resolved);
 }
 
 /**

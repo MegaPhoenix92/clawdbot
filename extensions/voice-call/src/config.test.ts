@@ -1,67 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  VoiceCallConfigSchema,
   validateProviderConfig,
+  normalizeVoiceCallConfig,
   resolveVoiceCallConfig,
   type VoiceCallConfig,
 } from "./config.js";
+import { createVoiceCallBaseConfig } from "./test-fixtures.js";
 
 function createBaseConfig(provider: "telnyx" | "twilio" | "plivo" | "mock"): VoiceCallConfig {
-  return {
-    enabled: true,
-    provider,
-    fromNumber: "+15550001234",
-    inboundPolicy: "disabled",
-    allowFrom: [],
-    outbound: { defaultMode: "notify", notifyHangupDelaySec: 3 },
-    maxDurationSeconds: 300,
-    staleCallReaperSeconds: 600,
-    silenceTimeoutMs: 800,
-    transcriptTimeoutMs: 180000,
-    ringTimeoutMs: 30000,
-    maxConcurrentCalls: 1,
-    serve: { port: 3334, bind: "127.0.0.1", path: "/voice/webhook" },
-    tailscale: { mode: "off", path: "/voice/webhook" },
-    tunnel: { provider: "none", allowNgrokFreeTierLoopbackBypass: false },
-    webhookSecurity: {
-      allowedHosts: [],
-      trustForwardingHeaders: false,
-      trustedProxyIPs: [],
-    },
-    streaming: {
-      enabled: false,
-      sttProvider: "openai-realtime",
-      sttModel: "gpt-4o-transcribe",
-      silenceDurationMs: 800,
-      vadThreshold: 0.5,
-      streamPath: "/voice/stream",
-      preStartTimeoutMs: 5000,
-      maxPendingConnections: 32,
-      maxPendingConnectionsPerIp: 4,
-      maxConnections: 128,
-    },
-    skipSignatureVerification: false,
-    stt: { provider: "openai", model: "whisper-1" },
-    tts: {
-      provider: "openai",
-      openai: { model: "gpt-4o-mini-tts", voice: "coral" },
-    },
-    responseModel: "openai/gpt-4o-mini",
-    responseTimeoutMs: 30000,
-    responseCues: {
-      enabled: false,
-      acknowledgement: "Got it, checking now.",
-      progress: "Still working on that.",
-      progressDelayMs: 6000,
-    },
-    singleTopic: {
-      enabled: false,
-      minKeywords: 2,
-      warningMessage: "Let's keep this call focused on one topic.",
-      endCallOnDrift: false,
-      maxDriftCount: 2,
-    },
-  };
+  return createVoiceCallBaseConfig({ provider });
 }
 
 describe("validateProviderConfig", () => {
@@ -225,81 +172,47 @@ describe("validateProviderConfig", () => {
   });
 });
 
-describe("response cues config", () => {
-  it("applies response cue defaults", () => {
-    const parsed = VoiceCallConfigSchema.parse({
+describe("normalizeVoiceCallConfig", () => {
+  it("fills nested runtime defaults from a partial config boundary", () => {
+    const normalized = normalizeVoiceCallConfig({
       enabled: true,
       provider: "mock",
-      fromNumber: "+15550001234",
-    });
-
-    expect(parsed.responseCues).toEqual({
-      enabled: false,
-      acknowledgement: "Got it, checking now.",
-      progress: "Still working on that.",
-      progressDelayMs: 6000,
-    });
-  });
-
-  it("accepts explicit response cue overrides", () => {
-    const parsed = VoiceCallConfigSchema.parse({
-      enabled: true,
-      provider: "mock",
-      fromNumber: "+15550001234",
-      responseCues: {
+      streaming: {
         enabled: true,
-        acknowledgement: "One sec.",
-        progress: "Still working.",
-        progressDelayMs: 2500,
+        streamPath: "/custom-stream",
       },
     });
 
-    expect(parsed.responseCues).toEqual({
-      enabled: true,
-      acknowledgement: "One sec.",
-      progress: "Still working.",
-      progressDelayMs: 2500,
-    });
-  });
-});
-
-describe("single-topic config", () => {
-  it("applies single-topic defaults", () => {
-    const parsed = VoiceCallConfigSchema.parse({
-      enabled: true,
-      provider: "mock",
-      fromNumber: "+15550001234",
-    });
-
-    expect(parsed.singleTopic).toEqual({
-      enabled: false,
-      minKeywords: 2,
-      warningMessage: "Let's keep this call focused on one topic.",
-      endCallOnDrift: false,
-      maxDriftCount: 2,
-    });
+    expect(normalized.serve.path).toBe("/voice/webhook");
+    expect(normalized.streaming.streamPath).toBe("/custom-stream");
+    expect(normalized.streaming.sttModel).toBe("gpt-4o-transcribe");
+    expect(normalized.tunnel.provider).toBe("none");
+    expect(normalized.webhookSecurity.allowedHosts).toEqual([]);
   });
 
-  it("accepts explicit single-topic overrides", () => {
-    const parsed = VoiceCallConfigSchema.parse({
-      enabled: true,
-      provider: "mock",
-      fromNumber: "+15550001234",
-      singleTopic: {
-        enabled: true,
-        minKeywords: 3,
-        warningMessage: "Please stick to one topic.",
-        endCallOnDrift: true,
-        maxDriftCount: 1,
+  it("accepts partial nested TTS overrides and preserves nested objects", () => {
+    const normalized = normalizeVoiceCallConfig({
+      tts: {
+        provider: "elevenlabs",
+        elevenlabs: {
+          apiKey: {
+            source: "env",
+            provider: "elevenlabs",
+            id: "ELEVENLABS_API_KEY",
+          },
+          voiceSettings: {
+            speed: 1.1,
+          },
+        },
       },
     });
 
-    expect(parsed.singleTopic).toEqual({
-      enabled: true,
-      minKeywords: 3,
-      warningMessage: "Please stick to one topic.",
-      endCallOnDrift: true,
-      maxDriftCount: 1,
+    expect(normalized.tts?.provider).toBe("elevenlabs");
+    expect(normalized.tts?.elevenlabs?.apiKey).toEqual({
+      source: "env",
+      provider: "elevenlabs",
+      id: "ELEVENLABS_API_KEY",
     });
+    expect(normalized.tts?.elevenlabs?.voiceSettings).toEqual({ speed: 1.1 });
   });
 });
