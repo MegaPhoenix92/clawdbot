@@ -16,6 +16,7 @@ import { onAgentEvent } from "../infra/agent-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { defaultRuntime } from "../runtime.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
+import { ensureRuntimePluginsLoaded } from "./runtime-plugins.js";
 import { resetAnnounceQueuesForTests } from "./subagent-announce-queue.js";
 import {
   captureSubagentCompletionReply,
@@ -44,6 +45,7 @@ import {
   countPendingDescendantRunsExcludingRunFromRuns,
   countPendingDescendantRunsFromRuns,
   findRunIdsByChildSessionKeyFromRuns,
+  listRunsForControllerFromRuns,
   listDescendantRunsForRequesterFromRuns,
   listRunsForRequesterFromRuns,
   resolveRequesterForChildSessionFromRuns,
@@ -313,10 +315,16 @@ function schedulePendingLifecycleError(params: { runId: string; endedAt: number;
 async function notifyContextEngineSubagentEnded(params: {
   childSessionKey: string;
   reason: SubagentEndReason;
+  workspaceDir?: string;
 }) {
   try {
+    const cfg = loadConfig();
+    ensureRuntimePluginsLoaded({
+      config: cfg,
+      workspaceDir: params.workspaceDir,
+    });
     ensureContextEnginesInitialized();
-    const engine = await resolveContextEngine(loadConfig());
+    const engine = await resolveContextEngine(cfg);
     if (!engine.onSubagentEnded) {
       return;
     }
@@ -714,6 +722,7 @@ async function sweepSubagentRuns() {
     void notifyContextEngineSubagentEnded({
       childSessionKey: entry.childSessionKey,
       reason: "swept",
+      workspaceDir: entry.workspaceDir,
     });
     subagentRuns.delete(runId);
     mutated = true;
@@ -964,6 +973,7 @@ function completeCleanupBookkeeping(params: {
     void notifyContextEngineSubagentEnded({
       childSessionKey: params.entry.childSessionKey,
       reason: "deleted",
+      workspaceDir: params.entry.workspaceDir,
     });
     subagentRuns.delete(params.runId);
     persistSubagentRuns();
@@ -973,6 +983,7 @@ function completeCleanupBookkeeping(params: {
   void notifyContextEngineSubagentEnded({
     childSessionKey: params.entry.childSessionKey,
     reason: "completed",
+    workspaceDir: params.entry.workspaceDir,
   });
   params.entry.cleanupCompletedAt = params.completedAt;
   persistSubagentRuns();
@@ -1137,6 +1148,7 @@ export function replaceSubagentRunAfterSteer(params: {
 export function registerSubagentRun(params: {
   runId: string;
   childSessionKey: string;
+  controllerSessionKey?: string;
   requesterSessionKey: string;
   requesterOrigin?: DeliveryContext;
   requesterDisplayKey: string;
@@ -1144,6 +1156,7 @@ export function registerSubagentRun(params: {
   cleanup: "delete" | "keep";
   label?: string;
   model?: string;
+  workspaceDir?: string;
   runTimeoutSeconds?: number;
   expectsCompletionMessage?: boolean;
   spawnMode?: "run" | "session";
@@ -1163,6 +1176,7 @@ export function registerSubagentRun(params: {
   subagentRuns.set(params.runId, {
     runId: params.runId,
     childSessionKey: params.childSessionKey,
+    controllerSessionKey: params.controllerSessionKey ?? params.requesterSessionKey,
     requesterSessionKey: params.requesterSessionKey,
     requesterOrigin,
     requesterDisplayKey: params.requesterDisplayKey,
@@ -1172,6 +1186,7 @@ export function registerSubagentRun(params: {
     spawnMode,
     label: params.label,
     model: params.model,
+    workspaceDir: params.workspaceDir,
     runTimeoutSeconds,
     createdAt: now,
     startedAt: now,
@@ -1286,6 +1301,7 @@ export function releaseSubagentRun(runId: string) {
     void notifyContextEngineSubagentEnded({
       childSessionKey: entry.childSessionKey,
       reason: "released",
+      workspaceDir: entry.workspaceDir,
     });
   }
   const didDelete = subagentRuns.delete(runId);
@@ -1405,6 +1421,13 @@ export function listSubagentRunsForRequester(
   options?: { requesterRunId?: string },
 ): SubagentRunRecord[] {
   return listRunsForRequesterFromRuns(subagentRuns, requesterSessionKey, options);
+}
+
+export function listSubagentRunsForController(controllerSessionKey: string): SubagentRunRecord[] {
+  return listRunsForControllerFromRuns(
+    getSubagentRunsSnapshotForRead(subagentRuns),
+    controllerSessionKey,
+  );
 }
 
 export function countActiveRunsForSession(requesterSessionKey: string): number {
