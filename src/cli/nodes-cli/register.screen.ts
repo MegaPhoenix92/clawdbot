@@ -1,5 +1,4 @@
 import type { Command } from "commander";
-import type { NodesRpcOpts } from "./types.js";
 import { defaultRuntime } from "../../runtime.js";
 import { shortenHomePath } from "../../utils.js";
 import {
@@ -10,6 +9,7 @@ import {
 import { parseDurationMs } from "../parse-duration.js";
 import { runNodesCommand } from "./cli-utils.js";
 import { buildNodeInvokeParams, callGatewayCli, nodesCallOpts, resolveNodeId } from "./rpc.js";
+import type { NodesRpcOpts } from "./types.js";
 
 export function registerNodesScreenCommands(nodes: Command) {
   const screen = nodes
@@ -57,21 +57,15 @@ export function registerNodesScreenCommands(nodes: Command) {
           const written = await writeScreenRecordToFile(filePath, parsed.base64);
 
           if (opts.json) {
-            defaultRuntime.log(
-              JSON.stringify(
-                {
-                  file: {
-                    path: written.path,
-                    durationMs: parsed.durationMs,
-                    fps: parsed.fps,
-                    screenIndex: parsed.screenIndex,
-                    hasAudio: parsed.hasAudio,
-                  },
-                },
-                null,
-                2,
-              ),
-            );
+            defaultRuntime.writeJson({
+              file: {
+                path: written.path,
+                durationMs: parsed.durationMs,
+                fps: parsed.fps,
+                screenIndex: parsed.screenIndex,
+                hasAudio: parsed.hasAudio,
+              },
+            });
             return;
           }
           defaultRuntime.log(`MEDIA:${shortenHomePath(written.path)}`);

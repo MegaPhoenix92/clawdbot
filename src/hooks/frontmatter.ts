@@ -1,10 +1,3 @@
-import type {
-  OpenClawHookMetadata,
-  HookEntry,
-  HookInstallSpec,
-  HookInvocationPolicy,
-  ParsedHookFrontmatter,
-} from "./types.js";
 import { parseFrontmatterBlock } from "../markdown/frontmatter.js";
 import {
   applyOpenClawManifestInstallCommonFields,
@@ -17,6 +10,13 @@ import {
   resolveOpenClawManifestOs,
   resolveOpenClawManifestRequires,
 } from "../shared/frontmatter.js";
+import type {
+  OpenClawHookMetadata,
+  HookEntry,
+  HookInstallSpec,
+  HookInvocationPolicy,
+  ParsedHookFrontmatter,
+} from "./types.js";
 
 export function parseFrontmatter(content: string): ParsedHookFrontmatter {
   return parseFrontmatterBlock(content);

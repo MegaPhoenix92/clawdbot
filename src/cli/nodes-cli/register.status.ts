@@ -1,5 +1,4 @@
 import type { Command } from "commander";
-import type { NodesRpcOpts } from "./types.js";
 import { formatTimeAgo } from "../../infra/format-time/format-relative.ts";
 import { defaultRuntime } from "../../runtime.js";
 import { getTerminalTableWidth, renderTable } from "../../terminal/table.js";
@@ -9,6 +8,7 @@ import { getNodesTheme, runNodesCommand } from "./cli-utils.js";
 import { formatPermissions, parseNodeList, parsePairingList } from "./format.js";
 import { renderPendingPairingRequestsTable } from "./pairing-render.js";
 import { callGatewayCli, nodesCallOpts, resolveNodeId } from "./rpc.js";
+import type { NodesRpcOpts } from "./types.js";
 
 function formatVersionLabel(raw: string) {
   const trimmed = raw.trim();
@@ -147,7 +147,7 @@ export function registerNodesStatusCommands(nodes: Command) {
 
           if (opts.json) {
             const ts = typeof obj.ts === "number" ? obj.ts : Date.now();
-            defaultRuntime.log(JSON.stringify({ ...obj, ts, nodes: filtered }, null, 2));
+            defaultRuntime.writeJson({ ...obj, ts, nodes: filtered });
             return;
           }
 
@@ -223,7 +223,7 @@ export function registerNodesStatusCommands(nodes: Command) {
             nodeId,
           });
           if (opts.json) {
-            defaultRuntime.log(JSON.stringify(result, null, 2));
+            defaultRuntime.writeJson(result);
             return;
           }
 
@@ -350,9 +350,7 @@ export function registerNodesStatusCommands(nodes: Command) {
           );
 
           if (opts.json) {
-            defaultRuntime.log(
-              JSON.stringify({ pending: pendingRows, paired: filteredPaired }, null, 2),
-            );
+            defaultRuntime.writeJson({ pending: pendingRows, paired: filteredPaired });
             return;
           }
 

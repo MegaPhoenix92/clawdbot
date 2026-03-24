@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import type { HookHandler } from "../../hooks.js";
-import type { InboundMessageHookContext } from "../../internal-hooks.js";
 import { createHookEvent } from "../../hooks.js";
+import type { InboundMessageHookContext } from "../../internal-hooks.js";
 
 let handler: HookHandler;
 

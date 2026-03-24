@@ -1,8 +1,9 @@
 import { Type } from "@sinclair/typebox";
-import type {
-  GatewayRequestHandlerOptions,
-  OpenClawPluginApi,
-} from "openclaw/plugin-sdk/voice-call";
+import {
+  definePluginEntry,
+  type GatewayRequestHandlerOptions,
+  type OpenClawPluginApi,
+} from "./api.js";
 import { registerVoiceCallCli } from "./src/cli.js";
 import {
   VoiceCallConfigSchema,
@@ -80,7 +81,7 @@ const voiceCallConfigSchema = {
     "streaming.streamPath": { label: "Media Stream Path", advanced: true },
     "tts.provider": {
       label: "TTS Provider Override",
-      help: "Deep-merges with messages.tts (Edge is ignored for calls).",
+      help: "Deep-merges with messages.tts (Microsoft is ignored for calls).",
       advanced: true,
     },
     "tts.openai.model": { label: "OpenAI TTS Model", advanced: true },
@@ -107,15 +108,6 @@ const voiceCallConfigSchema = {
     responseModel: { label: "Response Model", advanced: true },
     responseSystemPrompt: { label: "Response System Prompt", advanced: true },
     responseTimeoutMs: { label: "Response Timeout (ms)", advanced: true },
-    "responseCues.enabled": { label: "Enable Response Cues", advanced: true },
-    "responseCues.acknowledgement": { label: "Cue: Acknowledgement", advanced: true },
-    "responseCues.progress": { label: "Cue: Progress", advanced: true },
-    "responseCues.progressDelayMs": { label: "Cue: Progress Delay (ms)", advanced: true },
-    "singleTopic.enabled": { label: "Enable Single-Topic Guard", advanced: true },
-    "singleTopic.minKeywords": { label: "Single-Topic Min Keywords", advanced: true },
-    "singleTopic.warningMessage": { label: "Single-Topic Warning Message", advanced: true },
-    "singleTopic.endCallOnDrift": { label: "End Call On Topic Drift", advanced: true },
-    "singleTopic.maxDriftCount": { label: "Single-Topic Max Drift Count", advanced: true },
   },
 };
 
@@ -152,7 +144,7 @@ const VoiceCallToolSchema = Type.Union([
   }),
 ]);
 
-const voiceCallPlugin = {
+export default definePluginEntry({
   id: "voice-call",
   name: "Voice Call",
   description: "Voice-call plugin with Telnyx/Twilio/Plivo providers",
@@ -175,47 +167,6 @@ const voiceCallPlugin = {
     let runtimePromise: Promise<VoiceCallRuntime> | null = null;
     let runtime: VoiceCallRuntime | null = null;
 
-    // Resolve the main session key using core's canonical logic so transcript
-    // bridging targets the same queue regardless of agent-id/session-key config.
-    let mainSessionKey = "agent:main:main";
-    try {
-      mainSessionKey = api.runtime.system.resolveMainSessionKey(api.config);
-    } catch {
-      // Keep the default.
-    }
-
-    // Max transcript lines/chars to inject as a system event to avoid bloating prompts.
-    const MAX_TRANSCRIPT_LINES = 40;
-    const MAX_TRANSCRIPT_CHARS = 2000;
-
-    const onCallEnded = (call: CallRecord): void => {
-      if (!call.transcript.length) {
-        return;
-      }
-      const duration =
-        call.endedAt && call.startedAt ? Math.round((call.endedAt - call.startedAt) / 1000) : null;
-      const durationStr =
-        duration != null ? `${Math.floor(duration / 60)}m ${duration % 60}s` : "unknown";
-
-      let lines = call.transcript
-        .map((e) => `${e.speaker === "bot" ? "You" : "Caller"}: ${e.text}`)
-        .slice(-MAX_TRANSCRIPT_LINES);
-
-      let body = lines.join("\n");
-      if (body.length > MAX_TRANSCRIPT_CHARS) {
-        body = `…${body.slice(-MAX_TRANSCRIPT_CHARS)}`;
-      }
-
-      const text = `Voice call ended (${call.direction}, from ${call.from}, duration: ${durationStr}):\n${body}`;
-      try {
-        api.runtime.system.enqueueSystemEvent(text, { sessionKey: mainSessionKey });
-      } catch (err) {
-        api.logger.warn(
-          `[voice-call] Failed to bridge transcript: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    };
-
     const ensureRuntime = async () => {
       if (!config.enabled) {
         throw new Error("Voice call disabled in plugin config");
@@ -230,9 +181,9 @@ const voiceCallPlugin = {
         runtimePromise = createVoiceCallRuntime({
           config,
           coreConfig: api.config as CoreConfig,
+          agentRuntime: api.runtime.agent,
           ttsRuntime: api.runtime.tts,
           logger: api.logger,
-          onCallEnded,
         });
       }
       try {
@@ -610,6 +561,4 @@ const voiceCallPlugin = {
       },
     });
   },
-};
-
-export default voiceCallPlugin;
+});

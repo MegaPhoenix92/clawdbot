@@ -1,5 +1,4 @@
 import { Type, type Static } from "@sinclair/typebox";
-
 import { NonEmptyString } from "./primitives.js";
 
 // dm.pair.list params - empty object, no params needed

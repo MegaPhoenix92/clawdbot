@@ -10,8 +10,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChannelLogSink, TwitchAccountConfig, TwitchChatMessage } from "./types.js";
 import { TwitchClientManager } from "./twitch-client.js";
+import type { ChannelLogSink, TwitchAccountConfig, TwitchChatMessage } from "./types.js";
 
 // Mock @twurple dependencies
 const mockConnect = vi.fn().mockResolvedValue(undefined);
@@ -348,8 +348,10 @@ describe("TwitchClientManager", () => {
     it("should send message successfully", async () => {
       const result = await manager.sendMessage(testAccount, "testchannel", "Hello, world!");
 
-      expect(result.ok).toBe(true);
-      expect(result.messageId).toBeDefined();
+      expect(result).toMatchObject({ ok: true });
+      expect(result.messageId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
       expect(mockSay).toHaveBeenCalledWith("testchannel", "Hello, world!");
     });
 
