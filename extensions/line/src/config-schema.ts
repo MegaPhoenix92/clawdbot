@@ -1,8 +1,19 @@
 import { buildChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-schema";
-import { z } from "zod";
+import { z } from "openclaw/plugin-sdk/zod";
 
 const DmPolicySchema = z.enum(["open", "allowlist", "pairing", "disabled"]);
 const GroupPolicySchema = z.enum(["open", "allowlist", "disabled"]);
+const ThreadBindingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    idleHours: z.number().optional(),
+    maxAgeHours: z.number().optional(),
+    spawnSessions: z.boolean().optional(),
+    defaultSpawnContext: z.enum(["isolated", "fork"]).optional(),
+    spawnSubagentSessions: z.boolean().optional(),
+    spawnAcpSessions: z.boolean().optional(),
+  })
+  .strict();
 
 const LineCommonConfigSchema = z.object({
   enabled: z.boolean().optional(),
@@ -18,6 +29,7 @@ const LineCommonConfigSchema = z.object({
   responsePrefix: z.string().optional(),
   mediaMaxMb: z.number().optional(),
   webhookPath: z.string().optional(),
+  threadBindings: ThreadBindingsSchema.optional(),
 });
 
 const LineGroupConfigSchema = z

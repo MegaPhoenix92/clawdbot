@@ -17,6 +17,24 @@ describe("buildControlUiCspHeader", () => {
     expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
   });
 
+  it("allows OpenAI realtime WebRTC offer requests without allowing all HTTPS", () => {
+    const csp = buildControlUiCspHeader();
+    const connectSrc = csp.split("; ").find((directive) => directive.startsWith("connect-src "));
+    expect(connectSrc?.split(" ")).toEqual([
+      "connect-src",
+      "'self'",
+      "ws:",
+      "wss:",
+      "https://api.openai.com",
+    ]);
+  });
+
+  it("limits image loading to same-origin, data, and managed blob URLs", () => {
+    const csp = buildControlUiCspHeader();
+    expect(csp).toContain("img-src 'self' data: blob:");
+    expect(csp).not.toContain("img-src 'self' data: blob: https:");
+  });
+
   it("includes inline script hashes in script-src when provided", () => {
     const csp = buildControlUiCspHeader({
       inlineScriptHashes: ["sha256-abc123"],
@@ -53,6 +71,15 @@ describe("computeInlineScriptHashes", () => {
   it("skips scripts with src attribute", () => {
     const hashes = computeInlineScriptHashes('<html><script src="/app.js"></script></html>');
     expect(hashes).toEqual([]);
+  });
+
+  it("does not treat data-src as an external script attribute", () => {
+    const content = "console.log('inline')";
+    const expected = createHash("sha256").update(content, "utf8").digest("base64");
+    const hashes = computeInlineScriptHashes(
+      `<html><script data-src="/app.js">${content}</script></html>`,
+    );
+    expect(hashes).toEqual([`sha256-${expected}`]);
   });
 
   it("hashes only inline scripts when mixed with external", () => {
