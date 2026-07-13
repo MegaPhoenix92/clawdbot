@@ -110,8 +110,18 @@ describe("renderQrPngBase64", () => {
 
   it.each([
     ["dirPrefix", { dirPrefix: "../pair-", fileName: "qr.png" }],
+    ["dirPrefix", { dirPrefix: "..\\pair-", fileName: "qr.png" }],
+    ["dirPrefix", { dirPrefix: " pair-", fileName: "qr.png" }],
+    ["dirPrefix", { dirPrefix: "pair-\n", fileName: "qr.png" }],
     ["fileName", { dirPrefix: "pair-", fileName: "../qr.png" }],
-  ])("rejects pathful QR temp %s values", async (name, opts) => {
+    ["fileName", { dirPrefix: "pair-", fileName: "..\\qr.png" }],
+    ["fileName", { dirPrefix: "pair-", fileName: " qr.png" }],
+    ["fileName", { dirPrefix: "pair-", fileName: "qr:bad.png" }],
+    ["fileName", { dirPrefix: "pair-", fileName: "qr\u0000.png" }],
+    ["fileName", { dirPrefix: "pair-", fileName: "CON" }],
+    ["fileName", { dirPrefix: "pair-", fileName: "NUL.txt" }],
+    ["fileName", { dirPrefix: "pair-", fileName: "qr." }],
+  ])("rejects unsafe QR temp %s values", async (name, opts) => {
     await expect(
       writeQrPngTempFile("openclaw", {
         tmpRoot,

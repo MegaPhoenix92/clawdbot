@@ -72,6 +72,13 @@ describe("splitMediaFromOutput", () => {
   it.each([
     "MEDIA:../../../etc/passwd",
     "MEDIA:../../.env",
+    "MEDIA:..%2f.env",
+    "MEDIA:..%5c.env",
+    "MEDIA:%2e%2e/.env",
+    "MEDIA:.%2e/.env",
+    "MEDIA:foo%2fbar.png",
+    "MEDIA:foo%5cbar.png",
+    "MEDIA:%252e%252e%252f.env",
     "MEDIA:~user/Pictures/My File.png",
     "MEDIA:~/Pictures/../../.ssh/id_rsa",
     "MEDIA:./foo/../../../etc/shadow",

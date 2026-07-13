@@ -9,6 +9,8 @@ const MAX_QR_PNG_SCALE = 12;
 const MIN_QR_PNG_MARGIN_MODULES = 0;
 const MAX_QR_PNG_MARGIN_MODULES = 16;
 const QR_PNG_DATA_URL_PREFIX = "data:image/png;base64,";
+const WINDOWS_RESERVED_FILENAME_CHARS_RE = /[<>:"/\\|?*\u0000-\u001f]/;
+const WINDOWS_DEVICE_FILENAME_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 type QrPngRenderOptions = {
   scale?: number;
@@ -48,7 +50,18 @@ function resolveQrPngIntegerOption(params: {
 }
 
 function resolveQrTempPathSegment(name: string, value: string): string {
-  if (!value || value === "." || value === ".." || path.basename(value) !== value) {
+  const trimmed = value.trim();
+  if (
+    !value ||
+    trimmed !== value ||
+    value === "." ||
+    value === ".." ||
+    value.endsWith(".") ||
+    path.basename(value) !== value ||
+    path.win32.basename(value) !== value ||
+    WINDOWS_RESERVED_FILENAME_CHARS_RE.test(value) ||
+    WINDOWS_DEVICE_FILENAME_RE.test(value)
+  ) {
     throw new RangeError(`${name} must be a non-empty filename segment.`);
   }
   return value;

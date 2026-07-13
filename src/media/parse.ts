@@ -48,6 +48,9 @@ const HAS_FILE_EXT = /\.\w{1,10}$/;
 
 // Matches ".." as a standalone path segment (start, middle, or end).
 const TRAVERSAL_SEGMENT_RE = /(?:^|[/\\])\.\.(?:[/\\]|$)/;
+// Reject encoded path metacharacters before bare-filename fallback. Without this,
+// strings such as "..%2f.env" can look like plain filenames.
+const ENCODED_PATH_ESCAPE_RE = /%(?:2e|2f|5c)|%25(?:2e|2f|5c)/i;
 
 function isSupportedHomeRelativePath(candidate: string): boolean {
   return candidate.startsWith("~/") || candidate.startsWith("~\\");
@@ -58,6 +61,7 @@ function hasTraversalOrUnsupportedHomeDirPrefix(candidate: string): boolean {
     candidate.startsWith("../") ||
     candidate === ".." ||
     (candidate.startsWith("~") && !isSupportedHomeRelativePath(candidate)) ||
+    ENCODED_PATH_ESCAPE_RE.test(candidate) ||
     TRAVERSAL_SEGMENT_RE.test(candidate)
   );
 }
@@ -72,6 +76,7 @@ function looksLikeLocalFilePath(candidate: string): boolean {
     candidate.startsWith("~") ||
     WINDOWS_DRIVE_RE.test(candidate) ||
     candidate.startsWith("\\\\") ||
+    ENCODED_PATH_ESCAPE_RE.test(candidate) ||
     (!SCHEME_RE.test(candidate) && (candidate.includes("/") || candidate.includes("\\")))
   );
 }
