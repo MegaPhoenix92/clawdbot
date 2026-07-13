@@ -11,34 +11,29 @@ cd "$PROJECT_ROOT"
 
 echo "Rebranding OpenClaw to Phoenix..."
 
-# 1. Pairing messages - user-facing "access not configured" message
+# 1. Pairing messages - user-facing "access not configured" message.
+#    v2026.7.1: pairing copy centralized in src/pairing/pairing-messages.ts; the
+#    per-channel copies (telegram/matrix handler) were removed upstream, so they
+#    are no longer patched here.
 sed -i '' 's/"OpenClaw: access not configured\."/"Phoenix: access not configured."/g' \
   src/pairing/pairing-messages.ts
 
-# 2. Telegram bot context - same message
-sed -i '' 's/"OpenClaw: access not configured\."/"Phoenix: access not configured."/g' \
-  src/telegram/bot-message-context.ts
-
-# 3. Matrix extension - pairing message
-sed -i '' 's/"OpenClaw: access not configured\."/"Phoenix: access not configured."/g' \
-  extensions/matrix/src/matrix/monitor/handler.ts
-
-# 4. Matrix device name
+# 2. Matrix device name
 sed -i '' 's/"OpenClaw Gateway"/"Phoenix Gateway"/g' \
   extensions/matrix/src/matrix/client/config.ts
 sed -i '' 's/"OpenClaw Gateway"/"Phoenix Gateway"/g' \
   extensions/matrix/src/onboarding.ts
 
-# 5. UI Dashboard branding
-sed -i '' 's/alt="OpenClaw"/alt="Phoenix"/g' \
-  ui/src/ui/app-render.ts
-sed -i '' 's/<div class="brand-title">OPENCLAW<\/div>/<div class="brand-title">PHOENIX<\/div>/g' \
-  ui/src/ui/app-render.ts
+# 3. UI dashboard branding - moved from ui/src/ui/app-render.ts to ui/index.html in v2026.7.1
+sed -i '' 's|<title>OpenClaw Control</title>|<title>Phoenix Control</title>|g' ui/index.html
+sed -i '' 's/OpenClaw Control UI/Phoenix Control UI/g' ui/index.html
+sed -i '' 's/different OpenClaw version/different Phoenix version/g' ui/index.html
+sed -i '' 's/OpenClaw will retry/Phoenix will retry/g' ui/index.html
+sed -i '' 's/OpenClaw will keep retrying/Phoenix will keep retrying/g' ui/index.html
 
-# 5b. Replace favicon with Phoenix logo (basePath-aware pattern from v2026.2.9+)
+# 3b. Replace favicon with Phoenix logo
 if [ -f "ui/public/phoenix-logo.png" ]; then
-  sed -i '' 's|/favicon\.svg|/phoenix-logo.png|g' \
-    ui/src/ui/app-render.ts
+  sed -i '' 's|href="/favicon\.svg"|href="/phoenix-logo.png"|g' ui/index.html
   echo "  - Logo replaced with phoenix-logo.png"
 else
   echo "  - WARNING: ui/public/phoenix-logo.png not found, keeping default logo"
@@ -53,12 +48,10 @@ if grep -q '"OpenClaw:' src/channels/plugins/helpers.ts 2>/dev/null; then
   sed -i '' 's/"OpenClaw:/"Phoenix:/g' src/channels/plugins/helpers.ts
 fi
 
-# 8. Pairing approve commands - user-facing CLI hints in messaging channels
-# Note: feishu moved to extensions/feishu/ in v2026.2.9 and no longer has inline pairing messages
+# 8. Pairing approve commands - user-facing CLI hints in messaging channels.
+# v2026.7.1: telegram + matrix-handler no longer carry inline pairing hints (centralized).
 sed -i '' 's/openclaw pairing approve/phoenix pairing approve/g' \
   src/pairing/pairing-messages.ts \
-  src/telegram/bot-message-context.ts \
-  extensions/matrix/src/matrix/monitor/handler.ts \
   src/channels/plugins/helpers.ts \
   extensions/line/src/channel.ts
 
