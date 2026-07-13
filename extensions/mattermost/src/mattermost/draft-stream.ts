@@ -1,4 +1,6 @@
-import { createFinalizableDraftLifecycle } from "openclaw/plugin-sdk/channel-lifecycle";
+// Mattermost plugin module implements draft stream behavior.
+import { createFinalizableDraftLifecycle } from "openclaw/plugin-sdk/channel-outbound";
+import { sliceUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import {
   createMattermostPost,
   deleteMattermostPost,
@@ -28,12 +30,7 @@ function normalizeMattermostDraftText(text: string, maxChars: number): string {
   if (trimmed.length <= maxChars) {
     return trimmed;
   }
-  return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
-}
-
-export function buildMattermostToolStatusText(params: { name?: string; phase?: string }): string {
-  const tool = params.name?.trim() ? ` \`${params.name.trim()}\`` : " tool";
-  return `Running${tool}…`;
+  return `${sliceUtf16Safe(trimmed, 0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 export function createMattermostDraftStream(params: {

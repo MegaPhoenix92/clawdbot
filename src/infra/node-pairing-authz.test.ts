@@ -1,9 +1,17 @@
+// Covers scope requirements for node pairing approvals.
 import { describe, expect, it } from "vitest";
 import { resolveNodePairApprovalScopes } from "./node-pairing-authz.js";
 
 describe("resolveNodePairApprovalScopes", () => {
   it("requires operator.admin for system.run commands", () => {
     expect(resolveNodePairApprovalScopes(["system.run"])).toEqual([
+      "operator.pairing",
+      "operator.admin",
+    ]);
+  });
+
+  it("requires operator.admin for browser.proxy commands", () => {
+    expect(resolveNodePairApprovalScopes(["browser.proxy"])).toEqual([
       "operator.pairing",
       "operator.admin",
     ]);

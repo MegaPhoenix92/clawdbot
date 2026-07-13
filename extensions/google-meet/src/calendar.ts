@@ -1,3 +1,5 @@
+import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
+// Google Meet plugin module implements calendar behavior.
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { googleApiError } from "./google-api-errors.js";
 
@@ -138,10 +140,19 @@ function chooseBestMeetCalendarEvent(
   now: Date,
 ): GoogleMeetCalendarLookupResult["event"] | undefined {
   const nowMs = now.getTime();
-  return events
-    .filter((event) => event.status !== "cancelled")
-    .filter((event) => extractGoogleMeetUriFromCalendarEvent(event))
-    .toSorted((left, right) => rankCalendarEvent(left, nowMs) - rankCalendarEvent(right, nowMs))[0];
+  let selected: GoogleMeetCalendarEvent | undefined;
+  let selectedRank = Number.POSITIVE_INFINITY;
+  for (const event of events) {
+    if (event.status === "cancelled" || !extractGoogleMeetUriFromCalendarEvent(event)) {
+      continue;
+    }
+    const rank = rankCalendarEvent(event, nowMs);
+    if (!selected || rank < selectedRank) {
+      selected = event;
+      selectedRank = rank;
+    }
+  }
+  return selected;
 }
 
 async function fetchGoogleCalendarEvents(params: {
@@ -181,15 +192,16 @@ async function fetchGoogleCalendarEvents(params: {
   });
   try {
     if (!response.ok) {
-      const detail = await response.text();
       throw await googleApiError({
         response,
-        detail,
         prefix: "Google Calendar events.list",
         scopes: [GOOGLE_CALENDAR_EVENTS_SCOPE],
       });
     }
-    const payload = (await response.json()) as { items?: unknown };
+    const payload = await readProviderJsonResponse<{ items?: unknown }>(
+      response,
+      "Google Calendar events.list",
+    );
     if (payload.items !== undefined && !Array.isArray(payload.items)) {
       throw new Error("Google Calendar events.list response had non-array items");
     }

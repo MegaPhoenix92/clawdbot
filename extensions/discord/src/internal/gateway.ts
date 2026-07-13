@@ -1,3 +1,4 @@
+// Discord plugin module implements gateway behavior.
 import { EventEmitter } from "node:events";
 import {
   GatewayCloseCodes,
@@ -27,7 +28,6 @@ export type Activity = NonNullable<GatewayPresenceUpdateData["activities"]>[numb
 export type UpdatePresenceData = Omit<GatewayPresenceUpdateData, "status"> & {
   status: "online" | "idle" | "dnd" | "invisible" | "offline";
 };
-type UpdateVoiceStateData = GatewayVoiceStateUpdateData;
 type RequestGuildMembersData = {
   guild_id: string;
   query?: string;
@@ -43,12 +43,30 @@ type GatewayPluginOptions = {
   shard?: [number, number];
   url?: string;
 };
+type GatewayReconnectReason =
+  | "close"
+  | "identify"
+  | "invalid-session"
+  | "reconnect-opcode"
+  | "zombie";
+type GatewayReconnectOptions = {
+  reason: GatewayReconnectReason;
+  preferResume: boolean;
+  closeCode?: number;
+  minDelayMs?: number;
+};
 
 const READY_STATE_OPEN = 1;
 const DEFAULT_GATEWAY_URL = "wss://gateway.discord.gg/";
 const DISCORD_GATEWAY_PAYLOAD_LIMIT_BYTES = 4096;
+// Discord can send multi-megabyte member chunks. Keep generous headroom while
+// bounding ws's 100 MiB default before an inbound payload reaches JSON parsing.
+export const DISCORD_GATEWAY_WS_CLIENT_OPTIONS = Object.freeze({
+  maxPayload: 16 * 1024 * 1024,
+}) satisfies ws.ClientOptions;
 const INVALID_SESSION_MIN_DELAY_MS = 1_000;
 const INVALID_SESSION_JITTER_MS = 4_000;
+const RESUME_FAILURE_THRESHOLD = 3;
 
 function ensureGatewayParams(url: string): string {
   const parsed = new URL(url);
@@ -87,6 +105,7 @@ export class GatewayPlugin extends Plugin {
   private sessionId: string | null = null;
   private resumeGatewayUrl: string | null = null;
   private reconnectAttempts = 0;
+  private consecutiveResumeFailures = 0;
   private shouldReconnect = false;
   private isConnecting = false;
   private readonly heartbeatTimers = new GatewayHeartbeatTimers();
@@ -127,7 +146,7 @@ export class GatewayPlugin extends Plugin {
     this.heartbeatTimers.firstHeartbeatTimeout = timer;
   }
 
-  async registerClient(client: Client): Promise<void> {
+  override async registerClient(client: Client): Promise<void> {
     this.client = client;
     if (this.options.shard) {
       client.shardId = this.options.shard[0];
@@ -168,10 +187,11 @@ export class GatewayPlugin extends Plugin {
     this.isConnecting = false;
     this.isConnected = false;
     this.reconnectAttempts = 0;
+    this.consecutiveResumeFailures = 0;
   }
 
   protected createWebSocket(url: string): ws.WebSocket {
-    return new ws.WebSocket(url);
+    return new ws.WebSocket(url, DISCORD_GATEWAY_WS_CLIENT_OPTIONS);
   }
 
   private setupWebSocket(resume: boolean): void {
@@ -195,7 +215,7 @@ export class GatewayPlugin extends Plugin {
         this.emitter.emit("error", new Error("Invalid gateway payload"));
         return;
       }
-      this.handlePayload(payload, resume);
+      this.handlePayload(payload, resume, socket);
     });
     socket.on("close", (code) => {
       if (socket !== this.ws) {
@@ -219,7 +239,11 @@ export class GatewayPlugin extends Plugin {
       if (!canResume) {
         this.resetSessionState();
       }
-      this.scheduleReconnect(canResume, closeCode);
+      this.scheduleReconnect({
+        reason: "close",
+        preferResume: canResume,
+        closeCode,
+      });
     });
     socket.on("error", (error) => {
       if (socket !== this.ws) {
@@ -229,29 +253,34 @@ export class GatewayPlugin extends Plugin {
     });
   }
 
-  private handlePayload(payload: GatewayReceivePayload, resume: boolean): void {
+  private handlePayload(
+    payload: GatewayReceivePayload,
+    resume: boolean,
+    sourceSocket?: ws.WebSocket,
+  ): void {
     if (payload.s !== null && payload.s !== undefined) {
       this.sequence = payload.s;
     }
     switch (payload.op) {
-      case GatewayOpcodes.Hello:
+      case GatewayOpcodes.Hello: {
         this.startHeartbeat(
           (payload.d as { heartbeat_interval?: number }).heartbeat_interval ?? 45_000,
         );
-        if (resume && this.sessionId) {
+        const resumeState = resume ? this.getResumeState() : null;
+        if (resumeState) {
           this.send(
             {
               op: GatewayOpcodes.Resume,
               d: {
                 token: this.client?.options.token ?? "",
-                session_id: this.sessionId,
-                seq: this.sequence ?? 0,
+                session_id: resumeState.sessionId,
+                seq: resumeState.sequence,
               },
             } as GatewaySendPayload,
             true,
           );
         } else {
-          void this.identifyWithConcurrency().catch((error: unknown) => {
+          void this.identifyWithConcurrency(sourceSocket).catch((error: unknown) => {
             this.emitter.emit(
               "error",
               error instanceof Error ? error : new Error(String(error), { cause: error }),
@@ -259,6 +288,7 @@ export class GatewayPlugin extends Plugin {
           });
         }
         break;
+      }
       case GatewayOpcodes.HeartbeatAck:
         this.lastHeartbeatAck = true;
         break;
@@ -277,14 +307,15 @@ export class GatewayPlugin extends Plugin {
         if (!payload.d) {
           this.resetSessionState();
         }
-        this.scheduleReconnect(
-          payload.d,
-          undefined,
-          INVALID_SESSION_MIN_DELAY_MS + Math.floor(Math.random() * INVALID_SESSION_JITTER_MS),
-        );
+        this.scheduleReconnect({
+          reason: "invalid-session",
+          preferResume: payload.d,
+          minDelayMs:
+            INVALID_SESSION_MIN_DELAY_MS + Math.floor(Math.random() * INVALID_SESSION_JITTER_MS),
+        });
         break;
       case GatewayOpcodes.Reconnect:
-        this.scheduleReconnect(true);
+        this.scheduleReconnect({ reason: "reconnect-opcode", preferResume: true });
         break;
     }
   }
@@ -296,7 +327,7 @@ export class GatewayPlugin extends Plugin {
       onHeartbeat: () => this.sendHeartbeat(),
       onAckTimeout: () => {
         this.emitter.emit("error", new Error("Gateway heartbeat ACK timeout"));
-        this.scheduleReconnect(true);
+        this.scheduleReconnect({ reason: "zombie", preferResume: true });
       },
     });
   }
@@ -332,18 +363,17 @@ export class GatewayPlugin extends Plugin {
     );
   }
 
-  private async identifyWithConcurrency(): Promise<void> {
+  private async identifyWithConcurrency(sourceSocket?: ws.WebSocket): Promise<void> {
     await sharedGatewayIdentifyLimiter.wait({
       shardId: this.shardId,
       maxConcurrency: this.gatewayInfo?.session_start_limit.max_concurrency,
     });
-    const socket = this.ws;
-    if (!socket || socket.readyState !== READY_STATE_OPEN) {
-      const error = new Error("Discord gateway socket closed before IDENTIFY could be sent");
-      this.emitter.emit("error", error);
-      if (socket) {
-        this.scheduleReconnect(false);
-      }
+    const socket = sourceSocket ?? this.ws;
+    if (!socket || socket !== this.ws) {
+      return;
+    }
+    if (socket.readyState !== READY_STATE_OPEN) {
+      this.scheduleReconnect({ reason: "identify", preferResume: false });
       return;
     }
     this.identify();
@@ -382,10 +412,12 @@ export class GatewayPlugin extends Plugin {
       this.sessionId = ready.session_id ?? null;
       this.resumeGatewayUrl = ready.resume_gateway_url ?? null;
       this.reconnectAttempts = 0;
+      this.consecutiveResumeFailures = 0;
       this.isConnected = true;
     }
     if (payload.t === GatewayDispatchEvents.Resumed) {
       this.reconnectAttempts = 0;
+      this.consecutiveResumeFailures = 0;
       this.isConnected = true;
     }
     dispatchVoiceGatewayEvent(this.client, payload.t, payload.d);
@@ -400,9 +432,16 @@ export class GatewayPlugin extends Plugin {
     this.sessionId = null;
     this.resumeGatewayUrl = null;
     this.sequence = null;
+    this.consecutiveResumeFailures = 0;
   }
 
-  private scheduleReconnect(resume: boolean, closeCode?: number, minDelayMs = 0): void {
+  private getResumeState(): { sessionId: string; sequence: number } | null {
+    return this.sessionId && this.sequence !== null
+      ? { sessionId: this.sessionId, sequence: this.sequence }
+      : null;
+  }
+
+  private scheduleReconnect(options: GatewayReconnectOptions): void {
     if (!this.shouldReconnect) {
       return;
     }
@@ -419,17 +458,37 @@ export class GatewayPlugin extends Plugin {
       this.emitter.emit(
         "error",
         new Error(
-          `Max reconnect attempts (${maxAttempts}) reached${closeCode !== undefined ? ` after close code ${closeCode}` : ""}`,
+          `Max reconnect attempts (${maxAttempts}) reached${options.closeCode !== undefined ? ` after close code ${options.closeCode}` : ""}`,
         ),
       );
       return;
     }
+    let shouldResume = options.preferResume && this.getResumeState() !== null;
+    // Abnormal closes can leave a cached session permanently rejected. READY or RESUMED
+    // resets this streak; after the threshold, discard the poisoned session and IDENTIFY.
+    if (shouldResume && this.consecutiveResumeFailures >= RESUME_FAILURE_THRESHOLD) {
+      this.resetSessionState();
+      shouldResume = false;
+      this.emitter.emit(
+        "debug",
+        `Gateway forcing fresh IDENTIFY after ${RESUME_FAILURE_THRESHOLD} failed resume attempts`,
+      );
+    }
+    if (shouldResume) {
+      this.consecutiveResumeFailures += 1;
+    } else {
+      this.consecutiveResumeFailures = 0;
+    }
     const delay = Math.max(
-      minDelayMs,
+      options.minDelayMs ?? 0,
       Math.min(30_000, 1_000 * 2 ** Math.min(this.reconnectAttempts, 5)),
     );
+    this.emitter.emit(
+      "debug",
+      `Gateway reconnect scheduled in ${delay}ms (${options.reason}, resume=${String(shouldResume)})`,
+    );
     this.reconnectTimer.schedule(delay, () => {
-      this.connect(resume);
+      this.connect(shouldResume);
     });
   }
 
@@ -437,7 +496,7 @@ export class GatewayPlugin extends Plugin {
     this.send({ op: GatewayOpcodes.PresenceUpdate, d: data } as GatewaySendPayload);
   }
 
-  updateVoiceState(data: UpdateVoiceStateData): void {
+  updateVoiceState(data: GatewayVoiceStateUpdateData): void {
     this.send({ op: GatewayOpcodes.VoiceStateUpdate, d: data } as GatewaySendPayload, true);
   }
 
@@ -456,18 +515,6 @@ export class GatewayPlugin extends Plugin {
 
   getRateLimitStatus() {
     return this.outboundLimiter.getStatus();
-  }
-
-  getIntentsInfo() {
-    const intents = this.options.intents ?? 0;
-    return {
-      intents,
-      hasGuilds: this.hasIntent(GatewayIntentBits.Guilds),
-      hasGuildMembers: this.hasIntent(GatewayIntentBits.GuildMembers),
-      hasGuildPresences: this.hasIntent(GatewayIntentBits.GuildPresences),
-      hasGuildMessages: this.hasIntent(GatewayIntentBits.GuildMessages),
-      hasMessageContent: this.hasIntent(GatewayIntentBits.MessageContent),
-    };
   }
 
   hasIntent(intent: number): boolean {

@@ -1,3 +1,9 @@
+// Whatsapp plugin module implements channel outbound behavior.
+import {
+  createMessageReceiptFromOutboundResults,
+  defineChannelMessageAdapter,
+  type ChannelMessageSendResult,
+} from "openclaw/plugin-sdk/channel-outbound";
 import { chunkText } from "openclaw/plugin-sdk/reply-chunking";
 import { createWhatsAppOutboundBase } from "./outbound-base.js";
 import { normalizeWhatsAppPayloadTextPreservingIndentation } from "./outbound-media-contract.js";
@@ -5,7 +11,7 @@ import { resolveWhatsAppOutboundTarget } from "./resolve-outbound-target.js";
 import { getWhatsAppRuntime } from "./runtime.js";
 import { sendMessageWhatsApp, sendPollWhatsApp } from "./send.js";
 
-export function normalizeWhatsAppChannelPayloadText(text: string | undefined): string {
+function normalizeWhatsAppChannelPayloadText(text: string | undefined): string {
   return normalizeWhatsAppPayloadTextPreservingIndentation(text);
 }
 
@@ -34,3 +40,53 @@ export const whatsappChannelOutbound = {
     text: normalizeWhatsAppChannelPayloadText(payload.text),
   }),
 };
+
+function toWhatsAppMessageSendResult(
+  result: Awaited<ReturnType<NonNullable<typeof whatsappChannelOutbound.sendText>>>,
+  replyToId?: string | null,
+): ChannelMessageSendResult {
+  const source = result as typeof result & { toJid?: string };
+  const receipt =
+    result.receipt ??
+    createMessageReceiptFromOutboundResults({
+      results: result.messageId
+        ? [
+            {
+              channel: "whatsapp",
+              messageId: result.messageId,
+              toJid: source.toJid,
+            },
+          ]
+        : [],
+      kind: "text",
+      ...(replyToId ? { replyToId } : {}),
+    });
+  return {
+    messageId: result.messageId || receipt.primaryPlatformMessageId,
+    receipt,
+  };
+}
+
+export const whatsappMessageAdapter = defineChannelMessageAdapter({
+  id: "whatsapp",
+  durableFinal: {
+    capabilities: {
+      text: true,
+      replyTo: true,
+      messageSendingHooks: true,
+    },
+  },
+  send: {
+    text: async ({ onDeliveryResult, ...ctx }) => {
+      const result = await whatsappChannelOutbound.sendText!({
+        ...ctx,
+        onDeliveryResult: onDeliveryResult
+          ? async (progress) => {
+              await onDeliveryResult(toWhatsAppMessageSendResult(progress, ctx.replyToId));
+            }
+          : undefined,
+      });
+      return toWhatsAppMessageSendResult(result, ctx.replyToId);
+    },
+  },
+});

@@ -1,3 +1,8 @@
+/**
+ * External channel plugin catalog contract suites.
+ *
+ * Writes synthetic manifests and catalog files to prove parser behavior for discovered plugins.
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -116,6 +121,7 @@ function expectCatalogEntryMatch(params: {
   ).toMatchObject(params.expected);
 }
 
+/** Installs catalog entry tests shared by plugin registry and manifest suites. */
 export function describeChannelPluginCatalogEntriesContract() {
   describe("channel plugin catalog entries contract", () => {
     it.each([
@@ -301,19 +307,20 @@ export function describeChannelPluginCatalogEntriesContract() {
               label: "Prerelease Demo",
               blurb: "Prerelease package pinning fixture",
             }),
-            version: "2026.5.2-beta.2",
+            version: "2026.5.3-beta.1",
           });
           return {
             channelId: "prerelease-demo",
             catalogPaths: [catalogPath],
             expected: {
-              install: { npmSpec: "@openclaw/prerelease-demo-channel@2026.5.2-beta.2" },
+              install: { npmSpec: "@openclaw/prerelease-demo-channel@2026.5.3-beta.1" },
               installSource: {
                 npm: {
-                  spec: "@openclaw/prerelease-demo-channel@2026.5.2-beta.2",
+                  spec: "@openclaw/prerelease-demo-channel@2026.5.3-beta.1",
                   packageName: "@openclaw/prerelease-demo-channel",
-                  selector: "2026.5.2-beta.2",
+                  selector: "2026.5.3-beta.1",
                   selectorKind: "exact-version",
+                  exactVersion: true,
                 },
               },
             },
@@ -472,6 +479,7 @@ export function describeChannelPluginCatalogEntriesContract() {
   });
 }
 
+/** Installs catalog path resolution tests that depend on env/home/state paths. */
 export function describeChannelPluginCatalogPathResolutionContract() {
   describe("channel plugin catalog path resolution contract", () => {
     it.each([

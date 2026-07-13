@@ -1,5 +1,7 @@
-import { normalizeProviderId } from "../agents/provider-id.js";
-import { resolveBundledProviderPolicySurface } from "./provider-public-artifacts.js";
+// Resolves provider thinking-level policy from plugin metadata.
+import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import { getCurrentPluginMetadataSnapshot } from "./current-plugin-metadata-snapshot.js";
+import { resolveProviderPolicySurface } from "./provider-public-artifacts.js";
 import type {
   ProviderDefaultThinkingPolicyContext,
   ProviderThinkingProfile,
@@ -56,37 +58,51 @@ function resolveActiveThinkingProvider(providerId: string): ThinkingProviderPlug
   return undefined;
 }
 
+function resolveProviderPublicPolicySurface(providerId: string) {
+  const metadataSnapshot = getCurrentPluginMetadataSnapshot({
+    allowScopedSnapshot: true,
+    allowWorkspaceScopedSnapshot: true,
+  });
+  return resolveProviderPolicySurface(providerId, {
+    manifestRegistry: metadataSnapshot?.manifestRegistry,
+  });
+}
+
 type ThinkingHookParams<TContext> = {
   provider: string;
   context: TContext;
 };
 
+/** Resolves whether a provider treats thinking as binary on/off. */
 export function resolveProviderBinaryThinking(
   params: ThinkingHookParams<ProviderThinkingPolicyContext>,
 ) {
   return resolveActiveThinkingProvider(params.provider)?.isBinaryThinking?.(params.context);
 }
 
+/** Resolves whether a provider supports xhigh thinking. */
 export function resolveProviderXHighThinking(
   params: ThinkingHookParams<ProviderThinkingPolicyContext>,
 ) {
   return resolveActiveThinkingProvider(params.provider)?.supportsXHighThinking?.(params.context);
 }
 
+/** Resolves a provider thinking profile from active plugins or bundled policy surface. */
 export function resolveProviderThinkingProfile(
   params: ThinkingHookParams<ProviderDefaultThinkingPolicyContext>,
 ) {
   const activeProfile = resolveActiveThinkingProvider(params.provider)?.resolveThinkingProfile?.(
     params.context,
   );
-  if (activeProfile) {
+  if (activeProfile !== undefined) {
     return activeProfile;
   }
-  return resolveBundledProviderPolicySurface(params.provider)?.resolveThinkingProfile?.(
+  return resolveProviderPublicPolicySurface(params.provider)?.resolveThinkingProfile?.(
     params.context,
   );
 }
 
+/** Resolves the provider default thinking level from the active plugin registry. */
 export function resolveProviderDefaultThinkingLevel(
   params: ThinkingHookParams<ProviderDefaultThinkingPolicyContext>,
 ) {

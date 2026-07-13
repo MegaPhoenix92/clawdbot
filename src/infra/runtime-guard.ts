@@ -1,7 +1,8 @@
+// Validates the current runtime against OpenClaw's Node engine floor.
 import process from "node:process";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 
-type RuntimeKind = "node" | "unknown";
+type RuntimeKind = "bun" | "node" | "unknown";
 
 type Semver = {
   major: number;
@@ -9,9 +10,13 @@ type Semver = {
   patch: number;
 };
 
-const MIN_NODE: Semver = { major: 22, minor: 14, patch: 0 };
+const MIN_NODE_22: Semver = { major: 22, minor: 22, patch: 3 };
+const MIN_NODE_24: Semver = { major: 24, minor: 15, patch: 0 };
+const MIN_NODE_25: Semver = { major: 25, minor: 9, patch: 0 };
 const MINIMUM_ENGINE_RE = /^\s*>=\s*v?(\d+\.\d+\.\d+)\s*$/i;
+const ENGINE_CLAUSE_RE = /^\s*>=\s*v?(\d+\.\d+\.\d+)(?:\s+<\s*v?(\d+(?:\.\d+\.\d+)?))?\s*$/i;
 
+/** Runtime facts included in startup/runtime-version diagnostics. */
 export type RuntimeDetails = {
   kind: RuntimeKind;
   version: string | null;
@@ -21,6 +26,7 @@ export type RuntimeDetails = {
 
 const SEMVER_RE = /(\d+)\.(\d+)\.(\d+)/;
 
+/** Parses the first major/minor/patch triple from a runtime or package version label. */
 export function parseSemver(version: string | null): Semver | null {
   if (!version) {
     return null;
@@ -37,6 +43,7 @@ export function parseSemver(version: string | null): Semver | null {
   };
 }
 
+/** Compares parsed semver triples against an inclusive minimum version. */
 export function isAtLeast(version: Semver | null, minimum: Semver): boolean {
   if (!version) {
     return false;
@@ -50,9 +57,11 @@ export function isAtLeast(version: Semver | null, minimum: Semver): boolean {
   return version.patch >= minimum.patch;
 }
 
+/** Reads current process runtime metadata for startup support checks. */
 export function detectRuntime(): RuntimeDetails {
-  const kind: RuntimeKind = process.versions?.node ? "node" : "unknown";
-  const version = process.versions?.node ?? null;
+  const bunVersion = process.versions?.bun;
+  const kind: RuntimeKind = bunVersion ? "bun" : process.versions?.node ? "node" : "unknown";
+  const version = bunVersion ?? process.versions?.node ?? null;
 
   return {
     kind,
@@ -62,18 +71,33 @@ export function detectRuntime(): RuntimeDetails {
   };
 }
 
+/** Returns whether a detected runtime meets OpenClaw's minimum runtime contract. */
 export function runtimeSatisfies(details: RuntimeDetails): boolean {
-  const parsed = parseSemver(details.version);
   if (details.kind === "node") {
-    return isAtLeast(parsed, MIN_NODE);
+    return isSupportedNodeVersion(details.version);
   }
   return false;
 }
 
+/** Checks a Node version label against OpenClaw's supported Node version range. */
 export function isSupportedNodeVersion(version: string | null): boolean {
-  return isAtLeast(parseSemver(version), MIN_NODE);
+  const parsed = parseSemver(version);
+  if (!parsed) {
+    return false;
+  }
+  if (parsed.major === MIN_NODE_22.major) {
+    return isAtLeast(parsed, MIN_NODE_22);
+  }
+  if (parsed.major === MIN_NODE_24.major) {
+    return isAtLeast(parsed, MIN_NODE_24);
+  }
+  if (parsed.major === MIN_NODE_25.major) {
+    return isAtLeast(parsed, MIN_NODE_25);
+  }
+  return parsed.major > MIN_NODE_25.major;
 }
 
+/** Parses simple package `engines.node` ranges of the form `>=x.y.z`. */
 export function parseMinimumNodeEngine(engine: string | null): Semver | null {
   if (!engine) {
     return null;
@@ -85,17 +109,47 @@ export function parseMinimumNodeEngine(engine: string | null): Semver | null {
   return parseSemver(match[1] ?? null);
 }
 
+/** Returns whether a Node version satisfies a supported engine range, or null if unsupported. */
 export function nodeVersionSatisfiesEngine(
   version: string | null,
   engine: string | null,
 ): boolean | null {
   const minimum = parseMinimumNodeEngine(engine);
-  if (!minimum) {
+  if (minimum) {
+    return isAtLeast(parseSemver(version), minimum);
+  }
+
+  if (!engine) {
     return null;
   }
-  return isAtLeast(parseSemver(version), minimum);
+  const parsed = parseSemver(version);
+  if (!parsed) {
+    return false;
+  }
+
+  const clauses = engine.split("||");
+  let satisfied = false;
+  for (const clause of clauses) {
+    const match = clause.match(ENGINE_CLAUSE_RE);
+    if (!match) {
+      return null;
+    }
+    const clauseMinimum = parseSemver(match[1] ?? null);
+    const upperRaw = match[2];
+    const upper = upperRaw
+      ? parseSemver(upperRaw.includes(".") ? upperRaw : `${upperRaw}.0.0`)
+      : null;
+    if (!clauseMinimum || (upperRaw && !upper)) {
+      return null;
+    }
+    if (isAtLeast(parsed, clauseMinimum) && (!upper || !isAtLeast(parsed, upper))) {
+      satisfied = true;
+    }
+  }
+  return satisfied;
 }
 
+/** Exits through the provided runtime when the current Node runtime is unsupported. */
 export function assertSupportedRuntime(
   runtime: RuntimeEnv = defaultRuntime,
   details: RuntimeDetails = detectRuntime(),
@@ -108,14 +162,22 @@ export function assertSupportedRuntime(
   const runtimeLabel =
     details.kind === "unknown" ? "unknown runtime" : `${details.kind} ${versionLabel}`;
   const execLabel = details.execPath ?? "unknown";
+  const requirement =
+    details.kind === "bun"
+      ? "openclaw cannot run under Bun because the runtime does not provide node:sqlite."
+      : "openclaw requires Node >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0.";
+  const retryHint =
+    details.kind === "bun"
+      ? "Run OpenClaw with Node; Bun remains supported for installs and package scripts."
+      : "Upgrade Node and re-run openclaw.";
 
   runtime.error(
     [
-      "openclaw requires Node >=22.14.0.",
+      requirement,
       `Detected: ${runtimeLabel} (exec: ${execLabel}).`,
       `PATH searched: ${details.pathEnv}`,
       "Install Node: https://nodejs.org/en/download",
-      "Upgrade Node and re-run openclaw.",
+      retryHint,
     ].join("\n"),
   );
   runtime.exit(1);

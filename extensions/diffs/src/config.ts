@@ -1,6 +1,7 @@
+// Diffs helper module supports config behavior.
 import { mapPluginConfigIssues } from "openclaw/plugin-sdk/extension-shared";
 import { buildPluginConfigSchema } from "openclaw/plugin-sdk/plugin-entry";
-import { z } from "openclaw/plugin-sdk/zod";
+import { z } from "zod";
 import type { OpenClawPluginConfigSchema } from "../api.js";
 import {
   DIFF_IMAGE_QUALITY_PRESETS,
@@ -47,6 +48,7 @@ type DiffsPluginConfig = {
     /** @deprecated Use fileMaxWidth. */
     imageMaxWidth?: number;
     mode?: DiffMode;
+    ttlSeconds?: number;
   };
   security?: {
     allowRemoteViewer?: boolean;
@@ -89,6 +91,7 @@ export const DEFAULT_DIFFS_TOOL_DEFAULTS: DiffToolDefaults = {
   fileScale: DEFAULT_IMAGE_QUALITY_PROFILES.standard.scale,
   fileMaxWidth: DEFAULT_IMAGE_QUALITY_PROFILES.standard.maxWidth,
   mode: "both",
+  ttlSeconds: 1800,
 };
 
 type DiffsPluginSecurityConfig = {
@@ -141,15 +144,9 @@ const DiffsPluginJsonSchemaSource = z.strictObject({
       wordWrap: z.boolean().default(DEFAULT_DIFFS_TOOL_DEFAULTS.wordWrap).optional(),
       background: z.boolean().default(DEFAULT_DIFFS_TOOL_DEFAULTS.background).optional(),
       theme: z.enum(DIFF_THEMES).default(DEFAULT_DIFFS_TOOL_DEFAULTS.theme).optional(),
-      fileFormat: z
-        .enum(DIFF_OUTPUT_FORMATS)
-        .default(DEFAULT_DIFFS_TOOL_DEFAULTS.fileFormat)
-        .optional(),
+      fileFormat: z.enum(DIFF_OUTPUT_FORMATS).optional(),
       format: z.enum(DIFF_OUTPUT_FORMATS).optional().describe("Deprecated alias for fileFormat."),
-      fileQuality: z
-        .enum(DIFF_IMAGE_QUALITY_PRESETS)
-        .default(DEFAULT_DIFFS_TOOL_DEFAULTS.fileQuality)
-        .optional(),
+      fileQuality: z.enum(DIFF_IMAGE_QUALITY_PRESETS).optional(),
       fileScale: z.number().min(1).max(4).optional(),
       fileMaxWidth: z.number().min(640).max(2400).optional(),
       imageFormat: z
@@ -168,6 +165,12 @@ const DiffsPluginJsonSchemaSource = z.strictObject({
         .optional()
         .describe("Deprecated alias for fileMaxWidth."),
       mode: z.enum(DIFF_MODES).default(DEFAULT_DIFFS_TOOL_DEFAULTS.mode).optional(),
+      ttlSeconds: z
+        .number()
+        .min(1)
+        .max(21_600)
+        .default(DEFAULT_DIFFS_TOOL_DEFAULTS.ttlSeconds)
+        .optional(),
     })
     .optional(),
   security: z
@@ -216,12 +219,8 @@ export const diffsPluginConfigSchema: OpenClawPluginConfigSchema = {
 function resolveConfiguredValue<T>(options: {
   primary: T | undefined;
   aliases: Array<T | undefined>;
-  schemaDefault?: T;
 }): T | undefined {
   const alias = options.aliases.find((value): value is T => value !== undefined);
-  if (alias !== undefined && options.primary === options.schemaDefault) {
-    return alias;
-  }
   return options.primary ?? alias;
 }
 
@@ -248,14 +247,12 @@ export function resolveDiffsPluginDefaults(config: unknown): DiffToolDefaults {
     resolveConfiguredValue({
       primary: defaults.fileQuality,
       aliases: [defaults.imageQuality],
-      schemaDefault: DEFAULT_DIFFS_TOOL_DEFAULTS.fileQuality,
     }),
   );
   const profile = DEFAULT_IMAGE_QUALITY_PROFILES[fileQuality];
   const fileFormat = resolveConfiguredValue({
     primary: defaults.fileFormat,
     aliases: [defaults.imageFormat, defaults.format],
-    schemaDefault: DEFAULT_DIFFS_TOOL_DEFAULTS.fileFormat,
   });
   const fileScale = resolveConfiguredValue({
     primary: defaults.fileScale,
@@ -268,8 +265,8 @@ export function resolveDiffsPluginDefaults(config: unknown): DiffToolDefaults {
 
   return {
     fontFamily: normalizeFontFamily(defaults.fontFamily),
-    fontSize: normalizeFontSize(defaults.fontSize),
-    lineSpacing: normalizeLineSpacing(defaults.lineSpacing),
+    fontSize: normalizeDiffFontSize(defaults.fontSize),
+    lineSpacing: normalizeDiffLineSpacing(defaults.lineSpacing),
     layout: normalizeLayout(defaults.layout),
     showLineNumbers: defaults.showLineNumbers !== false,
     diffIndicators: normalizeDiffIndicators(defaults.diffIndicators),
@@ -281,6 +278,7 @@ export function resolveDiffsPluginDefaults(config: unknown): DiffToolDefaults {
     fileScale: normalizeFileScale(fileScale, profile.scale),
     fileMaxWidth: normalizeFileMaxWidth(fileMaxWidth, profile.maxWidth),
     mode: normalizeMode(defaults.mode),
+    ttlSeconds: normalizeTtlSeconds(defaults.ttlSeconds),
   };
 }
 
@@ -318,7 +316,7 @@ function normalizeFontFamily(fontFamily?: string): string {
   return normalized || DEFAULT_DIFFS_TOOL_DEFAULTS.fontFamily;
 }
 
-function normalizeFontSize(fontSize?: number): number {
+export function normalizeDiffFontSize(fontSize?: number): number {
   if (fontSize === undefined || !Number.isFinite(fontSize)) {
     return DEFAULT_DIFFS_TOOL_DEFAULTS.fontSize;
   }
@@ -326,7 +324,7 @@ function normalizeFontSize(fontSize?: number): number {
   return Math.min(Math.max(rounded, 10), 24);
 }
 
-function normalizeLineSpacing(lineSpacing?: number): number {
+export function normalizeDiffLineSpacing(lineSpacing?: number): number {
   if (lineSpacing === undefined || !Number.isFinite(lineSpacing)) {
     return DEFAULT_DIFFS_TOOL_DEFAULTS.lineSpacing;
   }
@@ -377,6 +375,14 @@ function normalizeFileMaxWidth(fileMaxWidth: number | undefined, fallback: numbe
 
 function normalizeMode(mode?: DiffMode): DiffMode {
   return mode && DIFF_MODES.includes(mode) ? mode : DEFAULT_DIFFS_TOOL_DEFAULTS.mode;
+}
+
+function normalizeTtlSeconds(ttlSeconds?: number): number {
+  if (ttlSeconds === undefined || !Number.isFinite(ttlSeconds)) {
+    return DEFAULT_DIFFS_TOOL_DEFAULTS.ttlSeconds;
+  }
+  const rounded = Math.floor(ttlSeconds);
+  return Math.min(Math.max(rounded, 1), 21_600);
 }
 
 export function resolveDiffImageRenderOptions(params: {

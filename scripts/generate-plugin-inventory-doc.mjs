@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Generates the plugin inventory documentation page.
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -24,13 +25,22 @@ const PLUGIN_DOC_ALIASES = new Map([
   ["duckduckgo", "/tools/duckduckgo-search"],
   ["exa", "/tools/exa-search"],
   ["firecrawl", "/tools/firecrawl"],
+  ["parallel", "/tools/parallel-search"],
   ["perplexity", "/tools/perplexity-search"],
+  ["policy", "/cli/policy"],
   ["tavily", "/tools/tavily"],
   ["tokenjuice", "/tools/tokenjuice"],
 ]);
+const SKIPPED_REFERENCE_PAGE_IDS = new Set(["parallel"]);
+const MANUAL_SECTION_START = "<!-- openclaw-plugin-reference:manual-start -->";
+const MANUAL_SECTION_END = "<!-- openclaw-plugin-reference:manual-end -->";
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), "utf8"));
+}
+
+function readJsonPath(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
 function fileExists(relativePath) {
@@ -66,6 +76,29 @@ function pluginReferencePath(id) {
   return `/plugins/reference/${id}`;
 }
 
+function hasGeneratedReferencePage(record) {
+  if (!SKIPPED_REFERENCE_PAGE_IDS.has(record.id)) {
+    return true;
+  }
+  if (PLUGIN_DOC_ALIASES.has(record.id)) {
+    return false;
+  }
+  throw new Error(`skipped plugin reference page ${record.id} needs a plugin doc alias`);
+}
+
+function pluginInventoryHref(record) {
+  if (hasGeneratedReferencePage(record)) {
+    return pluginReferencePath(record.id);
+  }
+  return PLUGIN_DOC_ALIASES.get(record.id) ?? null;
+}
+
+function pluginReferenceLabel(record) {
+  const label = escapeInventoryText(record.id);
+  const href = pluginInventoryHref(record);
+  return href ? docLink({ href, label }) : label;
+}
+
 function humanizeId(value) {
   const names = new Map([
     ["acpx", "ACPx"],
@@ -73,8 +106,8 @@ function humanizeId(value) {
     ["api", "API"],
     ["aws", "AWS"],
     ["azure", "Azure"],
-    ["bluebubbles", "BlueBubbles"],
     ["byteplus", "BytePlus"],
+    ["clawrouter", "ClawRouter"],
     ["codex", "Codex"],
     ["cli", "CLI"],
     ["comfy", "ComfyUI"],
@@ -98,6 +131,7 @@ function humanizeId(value) {
     ["litellm", "LiteLLM"],
     ["llm", "LLM"],
     ["lmstudio", "LM Studio"],
+    ["longcat", "LongCat"],
     ["mdns", "mDNS"],
     ["minimax", "MiniMax"],
     ["modelstudio", "Model Studio"],
@@ -108,10 +142,12 @@ function humanizeId(value) {
     ["opencode", "OpenCode"],
     ["openrouter", "OpenRouter"],
     ["otel", "OpenTelemetry"],
+    ["pixverse", "PixVerse"],
     ["qa", "QA"],
     ["qqbot", "QQ Bot"],
     ["qwen", "Qwen"],
     ["qwencloud", "Qwen Cloud"],
+    ["raft", "Raft"],
     ["searxng", "SearXNG"],
     ["sglang", "SGLang"],
     ["stepfun", "StepFun"],
@@ -207,7 +243,8 @@ function resolveDocs({ dirName, manifest, packageJson }) {
   const links = [];
   const pluginAlias = PLUGIN_DOC_ALIASES.get(manifest.id) ?? PLUGIN_DOC_ALIASES.get(dirName);
   if (pluginAlias) {
-    pushUniqueDocLink(links, { href: pluginAlias, label: manifest.id ?? dirName });
+    const pluginAliasLabel = manifest.id ?? dirName;
+    pushUniqueDocLink(links, { href: pluginAlias, label: pluginAliasLabel });
   }
 
   const channelDoc = normalizeDocPath(packageJson.openclaw?.channel?.docsPath);
@@ -289,6 +326,10 @@ function resolveInstallRoute(packageJson, status) {
     return "source checkout only";
   }
   if (status === "core") {
+    const release = packageJson.openclaw?.release;
+    if (release?.publishToClawHub === true || release?.publishToNpm === true) {
+      return `included in OpenClaw; ${resolveInstallRoute(packageJson, "external")}`;
+    }
     return "included in OpenClaw";
   }
   const install = packageJson.openclaw?.install;
@@ -300,7 +341,10 @@ function resolveInstallRoute(packageJson, status) {
       ? `: \`${install.npmSpec}\``
       : "";
   if (release?.publishToClawHub === true && release?.publishToNpm === true) {
-    return clawhubSpec ? `ClawHub${clawhubSpec}; npm${npmSpec}` : `ClawHub + npm${npmSpec}`;
+    if (install?.defaultChoice === "clawhub") {
+      return clawhubSpec ? `ClawHub${clawhubSpec}; npm${npmSpec}` : `ClawHub + npm${npmSpec}`;
+    }
+    return clawhubSpec ? `npm${npmSpec}; ClawHub${clawhubSpec}` : `npm${npmSpec}; ClawHub`;
   }
   if (release?.publishToClawHub === true) {
     return `ClawHub${clawhubSpec || npmSpec}`;
@@ -325,37 +369,21 @@ function resolveStatus({ dirName, packageJson, excludedDirs }) {
   return "source";
 }
 
-function escapeCell(value) {
-  return String(value).replaceAll("\n", " ").replaceAll("|", "\\|");
+function escapeInventoryText(value) {
+  return String(value).replaceAll("\n", " ").trim();
 }
 
-function renderTable(records) {
-  const rows = [
-    ["Plugin", "Description", "Distribution", "Surface"],
-    ...records.map((record) => [
-      docLink({ href: pluginReferencePath(record.id), label: escapeCell(record.id) }),
-      escapeCell(record.description),
-      `\`${escapeCell(record.packageName)}\`<br />${escapeCell(record.installRoute)}`,
-      escapeCell(record.surface),
-    ]),
-  ];
-  const widths = rows[0].map((_, index) => Math.max(...rows.map((row) => row[index].length), 3));
-  const lines = [];
-  lines.push(formatTableRow(rows[0], widths));
-  lines.push(
-    formatTableRow(
-      widths.map((width) => "-".repeat(width)),
-      widths,
-    ),
-  );
-  for (const row of rows.slice(1)) {
-    lines.push(formatTableRow(row, widths));
+function renderInventoryList(records) {
+  if (records.length === 0) {
+    return "_None._";
   }
-  return lines.join("\n");
-}
 
-function formatTableRow(row, widths) {
-  return `| ${row.map((cell, index) => cell.padEnd(widths[index])).join(" | ")} |`;
+  return records
+    .map(
+      (record) =>
+        `- **${pluginReferenceLabel(record)}** (\`${escapeInventoryText(record.packageName)}\`) - ${escapeInventoryText(record.installRoute)}. ${escapeInventoryText(record.description)}`,
+    )
+    .join("\n\n");
 }
 
 function renderRelatedDocs(record) {
@@ -367,8 +395,48 @@ function renderRelatedDocs(record) {
 ${record.docs.map((link) => `- ${docLink(link)}`).join("\n")}`;
 }
 
-function renderReferencePage(record) {
+function extractManualReferenceSections(content) {
+  const markerStart = content.indexOf(MANUAL_SECTION_START);
+  if (markerStart !== -1) {
+    const contentStart = markerStart + MANUAL_SECTION_START.length;
+    const markerEnd = content.indexOf(MANUAL_SECTION_END, contentStart);
+    if (markerEnd !== -1) {
+      return content.slice(contentStart, markerEnd).trim();
+    }
+  }
+
+  const surfaceMatch = /\n## Surface\n\n[^\n]*(?:\n|$)/u.exec(content);
+  if (!surfaceMatch?.index) {
+    return "";
+  }
+  const manualStart = surfaceMatch.index + surfaceMatch[0].length;
+  const relatedDocsStart = content.indexOf("\n## Related docs\n", manualStart);
+  const manualEnd = relatedDocsStart === -1 ? content.length : relatedDocsStart;
+  return content.slice(manualStart, manualEnd).trim();
+}
+
+function readManualReferenceSections(relativePath) {
+  const fullPath = path.join(ROOT, relativePath);
+  if (!fs.existsSync(fullPath)) {
+    return "";
+  }
+  return extractManualReferenceSections(fs.readFileSync(fullPath, "utf8"));
+}
+
+function renderManualReferenceSections(manualSections) {
+  if (!manualSections) {
+    return "";
+  }
+  return `${MANUAL_SECTION_START}
+
+${manualSections}
+
+${MANUAL_SECTION_END}`;
+}
+
+function renderReferencePage(record, manualSections = "") {
   const relatedDocs = renderRelatedDocs(record);
+  const manualBlock = renderManualReferenceSections(manualSections);
   return `---
 summary: "${record.description.replaceAll('"', '\\"')}"
 read_when:
@@ -387,11 +455,12 @@ ${record.description}
 
 ## Surface
 
-${record.surface}${relatedDocs ? `\n\n${relatedDocs}` : ""}
+${record.surface}${manualBlock ? `\n\n${manualBlock}` : ""}${relatedDocs ? `\n\n${relatedDocs}` : ""}
 `;
 }
 
 function renderReferenceIndex(records) {
+  const referenceCount = records.filter(hasGeneratedReferencePage).length;
   return `---
 summary: "Generated index of OpenClaw plugin reference pages"
 read_when:
@@ -409,15 +478,13 @@ This page is generated from \`extensions/*/package.json\` and
 pnpm plugins:inventory:gen
 \`\`\`
 
-${renderTable(records)}
+Use [Plugin inventory](/plugins/plugin-inventory) to browse all ${referenceCount}
+generated plugin reference pages by distribution, package, and description.
 `;
 }
 
-function collectPluginRecords() {
-  const rootPackageJson = readJson("package.json");
-  const excludedDirs = collectExcludedPackagedExtensionDirs(rootPackageJson);
-  const records = [];
-
+function collectPluginSourceEntries() {
+  const entries = [];
   for (const dirName of fs
     .readdirSync(EXTENSIONS_DIR)
     .toSorted((left, right) => left.localeCompare(right))) {
@@ -426,9 +493,45 @@ function collectPluginRecords() {
     if (!fs.existsSync(packagePath) || !fs.existsSync(manifestPath)) {
       continue;
     }
-    const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const packageJson = readJsonPath(packagePath);
+    const manifest = readJsonPath(manifestPath);
     const id = typeof manifest.id === "string" && manifest.id ? manifest.id : dirName;
+    entries.push({ dirName, id, manifest, packageJson });
+  }
+  return entries;
+}
+
+function validatePluginCoverage(records, sourceEntries) {
+  const expectedIds = sourceEntries
+    .map((entry) => entry.id)
+    .toSorted((left, right) => left.localeCompare(right));
+  const actualIds = records
+    .map((record) => record.id)
+    .toSorted((left, right) => left.localeCompare(right));
+  const missing = expectedIds.filter((id) => !actualIds.includes(id));
+  const extra = actualIds.filter((id) => !expectedIds.includes(id));
+  const duplicateIds = actualIds.filter((id, index) => actualIds.indexOf(id) !== index);
+  if (missing.length > 0 || extra.length > 0 || duplicateIds.length > 0) {
+    throw new Error(
+      [
+        "plugin inventory coverage mismatch",
+        missing.length > 0 ? `missing: ${missing.join(", ")}` : null,
+        extra.length > 0 ? `extra: ${extra.join(", ")}` : null,
+        duplicateIds.length > 0 ? `duplicates: ${duplicateIds.join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join("; "),
+    );
+  }
+}
+
+function collectPluginRecords() {
+  const rootPackageJson = readJson("package.json");
+  const excludedDirs = collectExcludedPackagedExtensionDirs(rootPackageJson);
+  const sourceEntries = collectPluginSourceEntries();
+  const records = [];
+
+  for (const { dirName, id, manifest, packageJson } of sourceEntries) {
     const status = resolveStatus({ dirName, packageJson, excludedDirs });
     records.push({
       description: resolveDescription({ manifest, packageJson }),
@@ -442,15 +545,18 @@ function collectPluginRecords() {
     });
   }
 
+  validatePluginCoverage(records, sourceEntries);
   return records.toSorted((left, right) => left.id.localeCompare(right.id));
 }
 
 function writeGeneratedDocs(records) {
   fs.mkdirSync(path.join(ROOT, REFERENCE_DIR), { recursive: true });
-  for (const record of records) {
+  for (const record of records.filter(hasGeneratedReferencePage)) {
+    const relativePath = path.join(REFERENCE_DIR, `${record.id}.md`);
+    const manualSections = readManualReferenceSections(relativePath);
     fs.writeFileSync(
-      path.join(ROOT, REFERENCE_DIR, `${record.id}.md`),
-      renderReferencePage(record),
+      path.join(ROOT, relativePath),
+      renderReferencePage(record, manualSections),
       "utf8",
     );
   }
@@ -460,10 +566,10 @@ function writeGeneratedDocs(records) {
 function readGeneratedDocs(records) {
   return [
     [REFERENCE_INDEX_PATH, renderReferenceIndex(records)],
-    ...records.map((record) => [
-      path.join(REFERENCE_DIR, `${record.id}.md`),
-      renderReferencePage(record),
-    ]),
+    ...records.filter(hasGeneratedReferencePage).map((record) => {
+      const relativePath = path.join(REFERENCE_DIR, `${record.id}.md`);
+      return [relativePath, renderReferencePage(record, readManualReferenceSections(relativePath))];
+    }),
   ];
 }
 
@@ -496,24 +602,53 @@ pnpm plugins:inventory:gen
 ## Definitions
 
 - **Core npm package:** built into the \`openclaw\` npm package and available without a separate plugin install.
-- **Official external package:** OpenClaw-maintained plugin omitted from the core npm package and installed through ClawHub and/or npm.
+- **Official external package:** OpenClaw-maintained plugin omitted from the core npm package, kept in this official inventory, and installed on demand through ClawHub and/or npm.
 - **Source checkout only:** repo-local plugin omitted from published npm artifacts and not advertised as an installable package.
 
 Source checkouts are different from npm installs: after \`pnpm install\`, bundled
 plugins load from \`extensions/<id>\` so local edits and package-local workspace
 dependencies are available.
 
+## Install a plugin
+
+Use the install route in each entry to decide whether install is needed. Plugins
+that say \`included in OpenClaw\` are already present in the core package.
+Official external packages need one install, then a Gateway restart.
+
+For example, Discord is an official external package:
+
+\`\`\`bash
+openclaw plugins install @openclaw/discord
+openclaw gateway restart
+openclaw plugins inspect discord --runtime --json
+\`\`\`
+
+During the launch cutover, ordinary bare package specs still install from npm.
+Use \`clawhub:@openclaw/discord\` or \`npm:@openclaw/discord\` when you need an
+explicit source. After install, follow the plugin's setup doc, such as
+[Discord](/channels/discord), to add credentials and channel config. See
+[Manage plugins](/plugins/manage-plugins) for update, uninstall, and publishing
+commands.
+
+Each entry lists the package, distribution route, and description.
+
 ## Core npm package
 
-${renderTable(groups.core)}
+${groups.core.length} plugins
+
+${renderInventoryList(groups.core)}
 
 ## Official external packages
 
-${renderTable(groups.external)}
+${groups.external.length} plugins
+
+${renderInventoryList(groups.external)}
 
 ## Source checkout only
 
-${renderTable(groups.source)}
+${groups.source.length} plugins
+
+${renderInventoryList(groups.source)}
 `;
 }
 

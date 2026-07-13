@@ -1,5 +1,5 @@
 ---
-summary: "Adds the Zalo Personal channel surface for sending and receiving OpenClaw messages."
+summary: "OpenClaw Zalo Personal Account plugin via native zca-js integration."
 read_when:
   - You are installing, configuring, or auditing the zalouser plugin
 title: "Zalo Personal plugin"
@@ -7,12 +7,12 @@ title: "Zalo Personal plugin"
 
 # Zalo Personal plugin
 
-Adds the Zalo Personal channel surface for sending and receiving OpenClaw messages.
+OpenClaw Zalo Personal Account plugin via native zca-js integration.
 
 ## Distribution
 
 - Package: `@openclaw/zalouser`
-- Install route: ClawHub + npm
+- Install route: npm; ClawHub
 
 ## Surface
 

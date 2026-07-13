@@ -1,3 +1,4 @@
+// Discord plugin module implements approval handler behavior.
 import { ButtonStyle } from "discord-api-types/v10";
 import type {
   ChannelApprovalCapabilityHandlerContext,
@@ -12,8 +13,12 @@ import type {
 import { createChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-runtime";
 import type { ExecApprovalActionDescriptor } from "openclaw/plugin-sdk/approval-reply-runtime";
 import type { ExecApprovalDecision } from "openclaw/plugin-sdk/approval-runtime";
-import type { DiscordExecApprovalConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import { logDebug, logError, normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import type {
+  DiscordExecApprovalConfig,
+  OpenClawConfig,
+} from "openclaw/plugin-sdk/config-contracts";
+import { logDebug, logError } from "openclaw/plugin-sdk/logging-core";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { shouldHandleDiscordApprovalRequest } from "./approval-shared.js";
 import { isDiscordExecApprovalClientEnabled } from "./exec-approvals.js";
 import {
@@ -44,7 +49,7 @@ type PreparedDeliveryTarget = {
   recipientUserId?: string;
 };
 
-export type DiscordApprovalHandlerContext = {
+type DiscordApprovalHandlerContext = {
   token: string;
   config: DiscordExecApprovalConfig;
 };
@@ -107,9 +112,9 @@ class ExecApprovalContainer extends DiscordUiContainer {
 }
 
 class ExecApprovalActionButton extends Button {
-  customId: string;
-  label: string;
-  style: ButtonStyle;
+  override customId: string;
+  override label: string;
+  override style: ButtonStyle;
 
   constructor(params: { approvalId: string; descriptor: ExecApprovalActionDescriptor }) {
     super();
@@ -154,10 +159,38 @@ function buildExecApprovalPayload(container: DiscordUiContainer): MessagePayload
   return { components };
 }
 
+const commandPreviewSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+
+function* iterateCommandPreviewSegments(commandText: string): Iterable<string> {
+  if (!commandPreviewSegmenter) {
+    yield* Array.from(commandText);
+    return;
+  }
+  try {
+    for (const segment of commandPreviewSegmenter.segment(commandText)) {
+      yield segment.segment;
+    }
+  } catch {
+    yield* Array.from(commandText);
+  }
+}
+
+function truncateCommandPreview(commandText: string, maxChars: number): string {
+  let commandRaw = "";
+  for (const segment of iterateCommandPreviewSegments(commandText)) {
+    if (commandRaw.length + segment.length > maxChars) {
+      return `${commandRaw}...`;
+    }
+    commandRaw += segment;
+  }
+  return commandText;
+}
+
 function formatCommandPreview(commandText: string, maxChars: number): string {
-  const commandRaw =
-    commandText.length > maxChars ? `${commandText.slice(0, maxChars)}...` : commandText;
-  return commandRaw.replace(/`/g, "\u200b`");
+  return truncateCommandPreview(commandText, maxChars).replace(/`/g, "\u200b`");
 }
 
 function formatOptionalCommandPreview(
@@ -448,13 +481,13 @@ export const discordApprovalNativeRuntime = createChannelApprovalNativeRuntimeAd
       const container =
         view.approvalKind === "plugin"
           ? createPluginApprovalRequestContainer({
-              view: view,
+              view,
               cfg,
               accountId: resolved.accountId,
               actionRow,
             })
           : createExecApprovalRequestContainer({
-              view: view,
+              view,
               cfg,
               accountId: resolved.accountId,
               actionRow,
@@ -471,12 +504,12 @@ export const discordApprovalNativeRuntime = createChannelApprovalNativeRuntimeAd
       const container =
         view.approvalKind === "plugin"
           ? createPluginResolvedContainer({
-              view: view,
+              view,
               cfg,
               accountId: resolvedContext.accountId,
             })
           : createExecResolvedContainer({
-              view: view,
+              view,
               cfg,
               accountId: resolvedContext.accountId,
             });
@@ -490,12 +523,12 @@ export const discordApprovalNativeRuntime = createChannelApprovalNativeRuntimeAd
       const container =
         view.approvalKind === "plugin"
           ? createPluginExpiredContainer({
-              view: view,
+              view,
               cfg,
               accountId: resolvedContext.accountId,
             })
           : createExecExpiredContainer({
-              view: view,
+              view,
               cfg,
               accountId: resolvedContext.accountId,
             });

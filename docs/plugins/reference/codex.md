@@ -1,5 +1,5 @@
 ---
-summary: "Codex app-server harness and Codex-managed GPT model catalog."
+summary: "OpenClaw Codex app-server harness and model provider plugin with a Codex-managed GPT catalog."
 read_when:
   - You are installing, configuring, or auditing the codex plugin
 title: "Codex plugin"
@@ -7,16 +7,16 @@ title: "Codex plugin"
 
 # Codex plugin
 
-Codex app-server harness and Codex-managed GPT model catalog.
+OpenClaw Codex app-server harness and model provider plugin with a Codex-managed GPT catalog.
 
 ## Distribution
 
 - Package: `@openclaw/codex`
-- Install route: ClawHub + npm
+- Install route: npm; ClawHub
 
 ## Surface
 
-providers: codex; contracts: mediaUnderstandingProviders, migrationProviders
+providers: codex; contracts: mediaUnderstandingProviders, migrationProviders, tools, webSearchProviders
 
 ## Related docs
 

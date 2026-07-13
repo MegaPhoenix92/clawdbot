@@ -24,18 +24,26 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
+function setEnvValue(key: string, value: string): void {
+  Reflect.set(process.env, key, value);
+}
+
+function deleteEnvValue(key: string): void {
+  Reflect.deleteProperty(process.env, key);
+}
+
 async function withStateDir<T>(name: string, fn: (stateDir: string) => Promise<T>): Promise<T> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `openclaw-${name}-`));
   const previousStateDir = process.env.OPENCLAW_STATE_DIR;
   try {
-    process.env.OPENCLAW_STATE_DIR = root;
+    setEnvValue("OPENCLAW_STATE_DIR", root);
     return await fn(root);
   } finally {
     resetCommitmentExtractionRuntimeForTests();
     if (previousStateDir === undefined) {
-      delete process.env.OPENCLAW_STATE_DIR;
+      deleteEnvValue("OPENCLAW_STATE_DIR");
     } else {
-      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      setEnvValue("OPENCLAW_STATE_DIR", previousStateDir);
     }
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -151,11 +159,8 @@ async function verifyExtractionStoresMetadataOnly() {
 
     const store = await loadCommitmentStore();
     assert(store.commitments.length === 1, `unexpected store size ${store.commitments.length}`);
-    assert(!("sourceUserText" in store.commitments[0]!), "source user text was persisted");
-    assert(
-      !("sourceAssistantText" in store.commitments[0]!),
-      "source assistant text was persisted",
-    );
+    assert(!("sourceUserText" in store.commitments[0]), "source user text was persisted");
+    assert(!("sourceAssistantText" in store.commitments[0]), "source assistant text was persisted");
     const raw = await fs.readFile(resolveCommitmentStorePath(), "utf8");
     assert(!raw.includes("CALL_TOOL"), "raw source text leaked into commitment store");
   });
@@ -212,8 +217,8 @@ async function verifyLegacySourceIsPrunedOnDueRead() {
       nowMs,
     });
     assert(due.length === 1, `unexpected due count ${due.length}`);
-    assert(!("sourceUserText" in due[0]!), "legacy source user text surfaced as due");
-    assert(!("sourceAssistantText" in due[0]!), "legacy source assistant text surfaced as due");
+    assert(!("sourceUserText" in due[0]), "legacy source user text surfaced as due");
+    assert(!("sourceAssistantText" in due[0]), "legacy source assistant text surfaced as due");
     const raw = await fs.readFile(storePath, "utf8");
     assert(!raw.includes("CALL_TOOL"), "legacy source text remained after due read");
   });
@@ -273,9 +278,9 @@ async function verifyExpiryTransitionsAndStripsLegacySource() {
 
     const store = await loadCommitmentStore();
     assert(store.commitments[0]?.status === "expired", "legacy commitment was not expired");
-    assert(!("sourceUserText" in store.commitments[0]!), "legacy source user text was retained");
+    assert(!("sourceUserText" in store.commitments[0]), "legacy source user text was retained");
     assert(
-      !("sourceAssistantText" in store.commitments[0]!),
+      !("sourceAssistantText" in store.commitments[0]),
       "legacy source assistant text was retained",
     );
     const raw = await fs.readFile(resolveCommitmentStorePath(), "utf8");

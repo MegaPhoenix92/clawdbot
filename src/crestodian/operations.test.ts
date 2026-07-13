@@ -1,16 +1,63 @@
+// Crestodian operation tests cover rescue operation planning and execution.
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { createCrestodianTestRuntime } from "./crestodian.test-helpers.js";
 import {
+  describeCrestodianPersistentOperation,
   executeCrestodianOperation,
+  isPersistentCrestodianOperation,
   parseCrestodianOperation,
-  type CrestodianOperationResult,
 } from "./operations.js";
 
 type TestConfig = Record<string, unknown>;
+
+function parseLastJsonLine(raw: string): unknown {
+  const lastLine = raw.trim().split("\n").at(-1);
+  if (!lastLine) {
+    throw new Error("Expected audit log to contain at least one JSON line");
+  }
+  return JSON.parse(lastLine) as unknown;
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`${label} was not an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function expectRecordFields(record: Record<string, unknown>, fields: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(fields)) {
+    expect(record[key]).toEqual(value);
+  }
+}
+
+function expectAuditRecord(
+  audit: unknown,
+  fields: Record<string, unknown>,
+  detailFields: Record<string, unknown>,
+) {
+  const auditRecord = requireRecord(audit, "audit record");
+  expectRecordFields(auditRecord, fields);
+  expectRecordFields(requireRecord(auditRecord.details, "audit details"), detailFields);
+}
+
+function requireFirstMockCall(mock: unknown, label: string): unknown[] {
+  const call = (mock as { mock?: { calls?: unknown[][] } }).mock?.calls?.[0];
+  if (!call) {
+    throw new Error(`missing ${label} call`);
+  }
+  return call;
+}
+
+function expectRuntimeArg(value: unknown) {
+  const runtime = requireRecord(value, "runtime argument");
+  expect(typeof runtime.log).toBe("function");
+}
 
 const mockConfig = vi.hoisted(() => {
   const initial = {};
@@ -46,14 +93,17 @@ const mockConfig = vi.hoisted(() => {
       state.config = {};
       state.hash = "mock-hash-0";
     },
-    missing(path: string) {
-      state.path = path;
+    missing(pathLocal: string) {
+      state.path = pathLocal;
       state.exists = false;
       state.config = {};
       state.hash = undefined;
     },
     currentConfig() {
       return cloneConfig();
+    },
+    setConfig(config: TestConfig) {
+      state.config = structuredClone(config);
     },
     readConfigFileSnapshot: vi.fn(async () => snapshot()),
     mutateConfigFile: vi.fn(
@@ -72,6 +122,7 @@ const mockConfig = vi.hoisted(() => {
         return {
           path: state.path,
           previousHash: before.hash ?? null,
+          persistedHash: before.hash ?? null,
           snapshot: before,
           nextConfig: cloneConfig(),
           result: undefined,
@@ -103,6 +154,7 @@ vi.mock("./overview.js", () => ({
     tools: {
       codex: { command: "codex", found: false, error: "not found" },
       claude: { command: "claude", found: false, error: "not found" },
+      gemini: { command: "gemini", found: false, error: "not found" },
       apiKeys: { openai: true, anthropic: false },
     },
     gateway: {
@@ -149,13 +201,19 @@ vi.mock("../config/model-input.js", () => ({
     typeof model === "string" ? model : model?.primary,
 }));
 
+const opTempDirs = useAutoCleanupTempDirTracker(afterEach);
+
 describe("parseCrestodianOperation", () => {
+  let stateDirSnapshot: ReturnType<typeof captureEnv> | undefined;
+
   beforeEach(() => {
     mockConfig.reset();
+    stateDirSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
     vi.stubEnv("OPENCLAW_TEST_FAST", "1");
   });
 
   afterEach(() => {
+    stateDirSnapshot?.restore();
     vi.unstubAllEnvs();
   });
 
@@ -170,6 +228,19 @@ describe("parseCrestodianOperation", () => {
     });
   });
 
+  it("parses interactive model provider setup", () => {
+    expect(parseCrestodianOperation("configure model provider")).toEqual({
+      kind: "model-setup",
+    });
+    expect(parseCrestodianOperation("setup model provider")).toEqual({
+      kind: "model-setup",
+    });
+    expect(parseCrestodianOperation("model setup workspace /tmp/work")).toEqual({
+      kind: "model-setup",
+      workspace: "/tmp/work",
+    });
+  });
+
   it("parses verbal agent switching", () => {
     expect(parseCrestodianOperation("talk to work agent")).toEqual({
       kind: "open-tui",
@@ -177,8 +248,14 @@ describe("parseCrestodianOperation", () => {
     });
   });
 
-  it("keeps ambiguous model requests read-only", () => {
-    expect(parseCrestodianOperation("models please")).toEqual({ kind: "models" });
+  it("routes ambiguous model requests to the AI instead of guessing", () => {
+    expect(parseCrestodianOperation("models please").kind).toBe("none");
+    expect(parseCrestodianOperation("why did my gateway stop").kind).toBe("none");
+    expect(parseCrestodianOperation("should I talk to my agent about this?").kind).toBe("none");
+    expect(parseCrestodianOperation("set me up with telegram").kind).toBe("none");
+    expect(parseCrestodianOperation("can I set the default model gpt-5.5 later?").kind).toBe(
+      "none",
+    );
   });
 
   it("parses gateway lifecycle operations", () => {
@@ -227,6 +304,75 @@ describe("parseCrestodianOperation", () => {
     });
   });
 
+  it("parses config read and schema lookups", () => {
+    expect(parseCrestodianOperation("config get gateway.port")).toEqual({
+      kind: "config-get",
+      path: "gateway.port",
+    });
+    expect(parseCrestodianOperation("config schema channels.telegram")).toEqual({
+      kind: "config-schema",
+      path: "channels.telegram",
+    });
+    expect(parseCrestodianOperation("config schema")).toEqual({ kind: "config-schema" });
+    // Read-only: no approval gate.
+    expect(isPersistentCrestodianOperation({ kind: "config-get", path: "gateway.port" })).toBe(
+      false,
+    );
+    expect(isPersistentCrestodianOperation({ kind: "config-schema" })).toBe(false);
+  });
+
+  it("redacts sensitive config values using their complete paths", async () => {
+    mockConfig.setConfig({
+      models: {
+        providers: {
+          local: {
+            localService: {
+              env: { HF_HOME: "/private/model-cache" },
+            },
+          },
+        },
+      },
+    });
+    const { runtime, lines } = createCrestodianTestRuntime();
+
+    await executeCrestodianOperation(
+      { kind: "config-get", path: "models.providers.local.localService" },
+      runtime,
+    );
+
+    expect(lines.join("\n")).toContain('"HF_HOME": "<redacted>"');
+    expect(lines.join("\n")).not.toContain("/private/model-cache");
+    expect(
+      describeCrestodianPersistentOperation({
+        kind: "config-set",
+        path: "models.providers.local.localService.env.HF_HOME",
+        value: "/private/model-cache",
+      }),
+    ).toBe("set config models.providers.local.localService.env.HF_HOME to <redacted>");
+  });
+
+  it("parses channel listing and connect requests", () => {
+    expect(parseCrestodianOperation("channels")).toEqual({ kind: "channel-list" });
+    expect(parseCrestodianOperation("list channels")).toEqual({ kind: "channel-list" });
+    expect(parseCrestodianOperation("connect telegram")).toEqual({
+      kind: "channel-setup",
+      channel: "telegram",
+    });
+    expect(parseCrestodianOperation("connect to WhatsApp")).toEqual({
+      kind: "channel-setup",
+      channel: "whatsapp",
+    });
+    expect(parseCrestodianOperation("link discord channel")).toEqual({
+      kind: "channel-setup",
+      channel: "discord",
+    });
+    // Starting the wizard is not a write; the wizard collects explicit answers.
+    expect(isPersistentCrestodianOperation({ kind: "channel-setup", channel: "telegram" })).toBe(
+      false,
+    );
+    expect(isPersistentCrestodianOperation({ kind: "channel-list" })).toBe(false);
+  });
+
   it("parses agent creation requests", () => {
     expect(
       parseCrestodianOperation("create agent Work workspace /tmp/work model openai/gpt-5.2"),
@@ -259,7 +405,7 @@ describe("parseCrestodianOperation", () => {
       deps: { runGatewayRestart },
     });
 
-    expect(result).toMatchObject<CrestodianOperationResult>({
+    expectRecordFields(result as unknown as Record<string, unknown>, {
       applied: false,
       message: "Plan: restart the Gateway. Say yes to apply.",
     });
@@ -271,30 +417,28 @@ describe("parseCrestodianOperation", () => {
     mockConfig.missing("/tmp/openclaw.json");
     const { runtime, lines } = createCrestodianTestRuntime();
 
-    await expect(
-      executeCrestodianOperation({ kind: "config-validate" }, runtime),
-    ).resolves.toMatchObject({ applied: false });
+    const result = await executeCrestodianOperation({ kind: "config-validate" }, runtime);
+    expect(result.applied).toBe(false);
 
     expect(lines.join("\n")).toContain("Config missing:");
   });
 
   it("applies config set through typed deps and writes an audit entry", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "crestodian-config-set-"));
-    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
+    const tempDir = opTempDirs.make("crestodian-config-set-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
     const { runtime, lines } = createCrestodianTestRuntime();
     const runConfigSet = vi.fn(async () => {});
 
-    await expect(
-      executeCrestodianOperation(
-        { kind: "config-set", path: "gateway.port", value: "19001" },
-        runtime,
-        {
-          approved: true,
-          deps: { runConfigSet },
-          auditDetails: { rescue: true, channel: "whatsapp" },
-        },
-      ),
-    ).resolves.toMatchObject({ applied: true });
+    const result = await executeCrestodianOperation(
+      { kind: "config-set", path: "gateway.port", value: "19001" },
+      runtime,
+      {
+        approved: true,
+        deps: { runConfigSet },
+        auditDetails: { rescue: true, channel: "whatsapp" },
+      },
+    );
+    expect(result.applied).toBe(true);
 
     expect(runConfigSet).toHaveBeenCalledWith({
       path: "gateway.port",
@@ -304,39 +448,38 @@ describe("parseCrestodianOperation", () => {
     expect(lines.join("\n")).toContain("[crestodian] done: config.set");
     const auditPath = path.join(tempDir, "audit", "crestodian.jsonl");
     const audit = JSON.parse((await fs.readFile(auditPath, "utf8")).trim());
-    expect(audit).toMatchObject({
-      operation: "config.set",
-      summary: "Set config gateway.port",
-      details: {
+    expectAuditRecord(
+      audit,
+      { operation: "config.set", summary: "Set config gateway.port" },
+      {
         rescue: true,
         channel: "whatsapp",
         path: "gateway.port",
       },
-    });
+    );
   });
 
   it("applies SecretRef config set through typed deps and writes an audit entry", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "crestodian-config-ref-"));
-    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
+    const tempDir = opTempDirs.make("crestodian-config-ref-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
     const { runtime, lines } = createCrestodianTestRuntime();
     const runConfigSet = vi.fn(async () => {});
 
-    await expect(
-      executeCrestodianOperation(
-        {
-          kind: "config-set-ref",
-          path: "gateway.auth.token",
-          source: "env",
-          id: "OPENCLAW_GATEWAY_TOKEN",
-        },
-        runtime,
-        {
-          approved: true,
-          deps: { runConfigSet },
-          auditDetails: { rescue: true, channel: "whatsapp" },
-        },
-      ),
-    ).resolves.toMatchObject({ applied: true });
+    const result = await executeCrestodianOperation(
+      {
+        kind: "config-set-ref",
+        path: "gateway.auth.token",
+        source: "env",
+        id: "OPENCLAW_GATEWAY_TOKEN",
+      },
+      runtime,
+      {
+        approved: true,
+        deps: { runConfigSet },
+        auditDetails: { rescue: true, channel: "whatsapp" },
+      },
+    );
+    expect(result.applied).toBe(true);
 
     expect(runConfigSet).toHaveBeenCalledWith({
       path: "gateway.auth.token",
@@ -349,17 +492,20 @@ describe("parseCrestodianOperation", () => {
     expect(lines.join("\n")).toContain("[crestodian] done: config.setRef");
     const auditPath = path.join(tempDir, "audit", "crestodian.jsonl");
     const audit = JSON.parse((await fs.readFile(auditPath, "utf8")).trim());
-    expect(audit).toMatchObject({
-      operation: "config.setRef",
-      summary: "Set config gateway.auth.token SecretRef",
-      details: {
+    expectAuditRecord(
+      audit,
+      {
+        operation: "config.setRef",
+        summary: "Set config gateway.auth.token SecretRef",
+      },
+      {
         rescue: true,
         channel: "whatsapp",
         path: "gateway.auth.token",
         source: "env",
         provider: "default",
       },
-    });
+    );
   });
 
   it("runs plugin list and search as read-only operations", async () => {
@@ -371,27 +517,28 @@ describe("parseCrestodianOperation", () => {
       pluginRuntime.log(`search rows: ${query}`);
     });
 
-    await expect(
-      executeCrestodianOperation({ kind: "plugin-list" }, runtime, {
+    const listResult = await executeCrestodianOperation({ kind: "plugin-list" }, runtime, {
+      deps: { runPluginsList, runPluginsSearch },
+    });
+    expect(listResult.applied).toBe(false);
+    const searchResult = await executeCrestodianOperation(
+      { kind: "plugin-search", query: "calendar" },
+      runtime,
+      {
         deps: { runPluginsList, runPluginsSearch },
-      }),
-    ).resolves.toMatchObject({ applied: false });
-    await expect(
-      executeCrestodianOperation({ kind: "plugin-search", query: "calendar" }, runtime, {
-        deps: { runPluginsList, runPluginsSearch },
-      }),
-    ).resolves.toMatchObject({ applied: false });
+      },
+    );
+    expect(searchResult.applied).toBe(false);
 
     expect(runPluginsList).toHaveBeenCalledWith(runtime);
     expect(runPluginsSearch).toHaveBeenCalledWith("calendar", runtime);
     expect(lines.join("\n")).toContain("plugin rows");
     expect(lines.join("\n")).toContain("search rows: calendar");
-    expect(lines.join("\n")).toContain("[crestodian] done: plugins.search");
   });
 
   it("installs plugins only after approval and audits the write", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "crestodian-plugin-install-"));
-    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
+    const tempDir = opTempDirs.make("crestodian-plugin-install-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
     const { runtime, lines } = createCrestodianTestRuntime();
     const runPluginInstall = vi.fn(async (spec: string, pluginRuntime: RuntimeEnv) => {
       pluginRuntime.log(`installed ${spec}`);
@@ -402,41 +549,42 @@ describe("parseCrestodianOperation", () => {
       runtime,
       { deps: { runPluginInstall } },
     );
-    expect(plan).toMatchObject({
+    expectRecordFields(plan as unknown as Record<string, unknown>, {
       applied: false,
       message: "Plan: install plugin clawhub:openclaw-demo. Say yes to apply.",
     });
     expect(runPluginInstall).not.toHaveBeenCalled();
 
-    await expect(
-      executeCrestodianOperation(
-        { kind: "plugin-install", spec: "clawhub:openclaw-demo" },
-        runtime,
-        {
-          approved: true,
-          deps: { runPluginInstall },
-          auditDetails: { rescue: true },
-        },
-      ),
-    ).resolves.toMatchObject({ applied: true });
+    const result = await executeCrestodianOperation(
+      { kind: "plugin-install", spec: "clawhub:openclaw-demo" },
+      runtime,
+      {
+        approved: true,
+        deps: { runPluginInstall },
+        auditDetails: { rescue: true },
+      },
+    );
+    expect(result.applied).toBe(true);
 
-    expect(runPluginInstall).toHaveBeenCalledWith("clawhub:openclaw-demo", expect.any(Object));
+    const installCall = requireFirstMockCall(runPluginInstall, "runPluginInstall");
+    expect(installCall[0]).toBe("clawhub:openclaw-demo");
+    expectRuntimeArg(installCall[1]);
     expect(lines.join("\n")).toContain("[crestodian] done: plugin.install");
     const auditPath = path.join(tempDir, "audit", "crestodian.jsonl");
     const audit = JSON.parse((await fs.readFile(auditPath, "utf8")).trim());
-    expect(audit).toMatchObject({
-      operation: "plugin.install",
-      summary: "Installed plugin clawhub:openclaw-demo",
-      details: {
-        rescue: true,
-        spec: "clawhub:openclaw-demo",
+    expectAuditRecord(
+      audit,
+      {
+        operation: "plugin.install",
+        summary: "Installed plugin clawhub:openclaw-demo",
       },
-    });
+      { rescue: true, spec: "clawhub:openclaw-demo" },
+    );
   });
 
   it("uninstalls plugins only after approval and audits the write", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "crestodian-plugin-uninstall-"));
-    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
+    const tempDir = opTempDirs.make("crestodian-plugin-uninstall-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
     const { runtime, lines } = createCrestodianTestRuntime();
     const runPluginUninstall = vi.fn(async (pluginId: string, pluginRuntime: RuntimeEnv) => {
       pluginRuntime.log(`uninstalled ${pluginId}`);
@@ -447,101 +595,153 @@ describe("parseCrestodianOperation", () => {
       runtime,
       { deps: { runPluginUninstall } },
     );
-    expect(plan).toMatchObject({
+    expectRecordFields(plan as unknown as Record<string, unknown>, {
       applied: false,
       message: "Plan: uninstall plugin openclaw-demo. Say yes to apply.",
     });
     expect(runPluginUninstall).not.toHaveBeenCalled();
 
-    await expect(
-      executeCrestodianOperation({ kind: "plugin-uninstall", pluginId: "openclaw-demo" }, runtime, {
+    const result = await executeCrestodianOperation(
+      { kind: "plugin-uninstall", pluginId: "openclaw-demo" },
+      runtime,
+      {
         approved: true,
         deps: { runPluginUninstall },
         auditDetails: { rescue: true },
-      }),
-    ).resolves.toMatchObject({ applied: true });
+      },
+    );
+    expect(result.applied).toBe(true);
 
-    expect(runPluginUninstall).toHaveBeenCalledWith("openclaw-demo", expect.any(Object));
+    const uninstallCall = requireFirstMockCall(runPluginUninstall, "runPluginUninstall");
+    expect(uninstallCall[0]).toBe("openclaw-demo");
+    expectRuntimeArg(uninstallCall[1]);
     expect(lines.join("\n")).toContain("[crestodian] done: plugin.uninstall");
     const auditPath = path.join(tempDir, "audit", "crestodian.jsonl");
     const audit = JSON.parse((await fs.readFile(auditPath, "utf8")).trim());
-    expect(audit).toMatchObject({
-      operation: "plugin.uninstall",
-      summary: "Uninstalled plugin openclaw-demo",
-      details: {
-        rescue: true,
-        pluginId: "openclaw-demo",
+    expectAuditRecord(
+      audit,
+      {
+        operation: "plugin.uninstall",
+        summary: "Uninstalled plugin openclaw-demo",
       },
-    });
+      { rescue: true, pluginId: "openclaw-demo" },
+    );
   });
 
   it("runs setup bootstrap only after approval and audits it", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "crestodian-setup-"));
-    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
+    const tempDir = opTempDirs.make("crestodian-setup-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
     vi.stubEnv("OPENAI_API_KEY", "test-key");
     const { runtime, lines } = createCrestodianTestRuntime();
+    const applySetup = vi.fn(async () => ({
+      configPath: path.join(tempDir, "openclaw.json"),
+      lines: ["Workspace: /tmp/work", "Default model: openai/gpt-5.6"],
+    }));
 
     const plan = await executeCrestodianOperation(
       { kind: "setup", workspace: "/tmp/work" },
       runtime,
+      { deps: { applySetup } },
     );
-    expect(plan).toMatchObject({
+    expectRecordFields(plan as unknown as Record<string, unknown>, {
       applied: false,
     });
-    expect(lines.join("\n")).toContain("Model choice: openai/gpt-5.5 (OPENAI_API_KEY).");
+    expect(lines.join("\n")).toContain("Model choice: openai/gpt-5.6 (OPENAI_API_KEY).");
+    expect(applySetup).not.toHaveBeenCalled();
 
-    await expect(
-      executeCrestodianOperation({ kind: "setup", workspace: "/tmp/work" }, runtime, {
+    const result = await executeCrestodianOperation(
+      { kind: "setup", workspace: "/tmp/work" },
+      runtime,
+      {
         approved: true,
         auditDetails: { rescue: true },
-      }),
-    ).resolves.toMatchObject({ applied: true });
+        deps: { applySetup },
+      },
+    );
+    expect(result.applied).toBe(true);
 
     expect(lines.join("\n")).toContain("[crestodian] done: crestodian.setup");
-    expect(mockConfig.currentConfig()).toMatchObject({
-      agents: {
-        defaults: {
-          workspace: "/tmp/work",
-          model: { primary: "openai/gpt-5.5" },
-        },
-      },
+    expect(applySetup).toHaveBeenCalledWith({
+      workspace: "/tmp/work",
+      model: "openai/gpt-5.6",
+      surface: "cli",
+      runtime,
     });
     const auditPath = path.join(tempDir, "audit", "crestodian.jsonl");
     const audit = JSON.parse((await fs.readFile(auditPath, "utf8")).trim());
-    expect(audit).toMatchObject({
-      operation: "crestodian.setup",
-      summary: "Bootstrapped setup with openai/gpt-5.5",
-      details: {
+    expectAuditRecord(
+      audit,
+      {
+        operation: "crestodian.setup",
+        summary: "Bootstrapped setup with openai/gpt-5.6",
+      },
+      {
         rescue: true,
         workspace: "/tmp/work",
-        model: "openai/gpt-5.5",
+        model: "openai/gpt-5.6",
         modelSource: "OPENAI_API_KEY",
       },
+    );
+  });
+
+  it("offers provider setup after a providerless bootstrap", async () => {
+    const tempDir = opTempDirs.make("crestodian-providerless-setup-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
+    const { runtime, lines } = createCrestodianTestRuntime();
+    const applySetup = vi.fn(async () => ({
+      configPath: path.join(tempDir, "openclaw.json"),
+      lines: ["Workspace: /tmp/work"],
+    }));
+    const deps = {
+      applySetup,
+      detectInferenceBackends: async () => [],
+    };
+
+    const plan = await executeCrestodianOperation(
+      { kind: "setup", workspace: "/tmp/work" },
+      runtime,
+      { deps },
+    );
+
+    expect(plan.message).toContain("then offer guided model-provider setup");
+
+    const result = await executeCrestodianOperation(
+      { kind: "setup", workspace: "/tmp/work" },
+      runtime,
+      {
+        approved: true,
+        deps,
+      },
+    );
+
+    expect(result).toMatchObject({
+      applied: true,
+      followUp: { kind: "model-setup", workspace: "/tmp/work" },
     });
+    expect(lines.join("\n")).toContain("Default model: not configured yet");
   });
 
   it("runs doctor repairs only after approval and audits them", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "crestodian-doctor-fix-"));
-    vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
+    const tempDir = opTempDirs.make("crestodian-doctor-fix-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
     const { runtime, lines } = createCrestodianTestRuntime();
     const runDoctor = vi.fn(async () => {});
 
     const plan = await executeCrestodianOperation({ kind: "doctor-fix" }, runtime, {
       deps: { runDoctor },
     });
-    expect(plan).toMatchObject({
+    expectRecordFields(plan as unknown as Record<string, unknown>, {
       applied: false,
       message: "Plan: run doctor repairs. Say yes to apply.",
     });
     expect(runDoctor).not.toHaveBeenCalled();
 
-    await expect(
-      executeCrestodianOperation({ kind: "doctor-fix" }, runtime, {
-        approved: true,
-        deps: { runDoctor },
-        auditDetails: { rescue: true },
-      }),
-    ).resolves.toMatchObject({ applied: true });
+    const result = await executeCrestodianOperation({ kind: "doctor-fix" }, runtime, {
+      approved: true,
+      deps: { runDoctor },
+      auditDetails: { rescue: true },
+    });
+    expect(result.applied).toBe(true);
 
     expect(runDoctor).toHaveBeenCalledWith(runtime, {
       nonInteractive: true,
@@ -550,12 +750,12 @@ describe("parseCrestodianOperation", () => {
     });
     expect(lines.join("\n")).toContain("[crestodian] done: doctor.fix");
     const auditPath = path.join(tempDir, "audit", "crestodian.jsonl");
-    const audit = JSON.parse((await fs.readFile(auditPath, "utf8")).trim().split("\n").at(-1)!);
-    expect(audit).toMatchObject({
-      operation: "doctor.fix",
-      summary: "Ran doctor repairs",
-      details: { rescue: true },
-    });
+    const audit = parseLastJsonLine(await fs.readFile(auditPath, "utf8"));
+    expectAuditRecord(
+      audit,
+      { operation: "doctor.fix", summary: "Ran doctor repairs" },
+      { rescue: true },
+    );
   });
 
   it("returns from the agent TUI back to Crestodian", async () => {
@@ -579,7 +779,7 @@ describe("parseCrestodianOperation", () => {
       deliver: false,
       historyLimit: 200,
     });
-    expect(result).toMatchObject({
+    expectRecordFields(result as unknown as Record<string, unknown>, {
       applied: false,
       nextInput: "restart gateway",
     });

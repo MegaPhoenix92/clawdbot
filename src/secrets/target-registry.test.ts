@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+/** Tests secret target registry matching and docs coverage. */
+import { beforeAll, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
   buildTalkTestProviderConfig,
@@ -12,6 +13,10 @@ import {
 } from "./target-registry.js";
 
 describe("secret target registry", () => {
+  beforeAll(() => {
+    resolveConfigSecretTargetByPath(["channels", "googlechat", "serviceAccount"]);
+  });
+
   it("supports filtered discovery by target ids", () => {
     const config = {
       ...buildTalkTestProviderConfig({ source: "env", provider: "default", id: "TALK_API_KEY" }),
@@ -33,9 +38,21 @@ describe("secret target registry", () => {
   it("resolves config targets by exact path including sibling ref metadata", () => {
     const target = resolveConfigSecretTargetByPath(["channels", "googlechat", "serviceAccount"]);
 
-    expect(target).not.toBeNull();
     expect(target?.entry?.id).toBe("channels.googlechat.serviceAccount");
     expect(target?.refPathSegments).toEqual(["channels", "googlechat", "serviceAccountRef"]);
+  });
+
+  it("resolves talk realtime provider api key targets", () => {
+    const target = resolveConfigSecretTargetByPath([
+      "talk",
+      "realtime",
+      "providers",
+      "openai",
+      "apiKey",
+    ]);
+
+    expect(target?.entry?.id).toBe("talk.realtime.providers.*.apiKey");
+    expect(target?.providerId).toBe("openai");
   });
 
   it("returns null when no config target path matches", () => {
@@ -58,7 +75,6 @@ describe("secret target registry", () => {
       "apiKey",
     ]);
 
-    expect(target).not.toBeNull();
     expect(target?.entry?.id).toBe("plugins.entries.exa.config.webSearch.apiKey");
 
     const fetchTarget = resolveConfigSecretTargetByPath([
@@ -69,13 +85,13 @@ describe("secret target registry", () => {
       "webFetch",
       "apiKey",
     ]);
-    expect(fetchTarget).not.toBeNull();
     expect(fetchTarget?.entry?.id).toBe("plugins.entries.firecrawl.config.webFetch.apiKey");
   });
 
   it("derives bundled plugin SecretInput contract target paths from plugin manifests", () => {
     const coreTargetIds = new Set(getCoreSecretTargetRegistry().map((entry) => entry.id));
     expect(coreTargetIds.has("plugins.entries.voice-call.config.twilio.authToken")).toBe(false);
+    expect(coreTargetIds.has("plugins.entries.codex.config.appServer.authToken")).toBe(false);
 
     const target = resolveConfigSecretTargetByPath([
       "plugins",
@@ -88,7 +104,27 @@ describe("secret target registry", () => {
       "apiKey",
     ]);
 
-    expect(target).not.toBeNull();
     expect(target?.entry?.id).toBe("plugins.entries.voice-call.config.tts.providers.*.apiKey");
+
+    const codexAuthTarget = resolveConfigSecretTargetByPath([
+      "plugins",
+      "entries",
+      "codex",
+      "config",
+      "appServer",
+      "authToken",
+    ]);
+    expect(codexAuthTarget?.entry?.id).toBe("plugins.entries.codex.config.appServer.authToken");
+
+    const codexHeaderTarget = resolveConfigSecretTargetByPath([
+      "plugins",
+      "entries",
+      "codex",
+      "config",
+      "appServer",
+      "headers",
+      "x-codex-client-session-token",
+    ]);
+    expect(codexHeaderTarget?.entry?.id).toBe("plugins.entries.codex.config.appServer.headers.*");
   });
 });

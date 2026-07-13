@@ -1,3 +1,9 @@
+// Nextcloud Talk plugin module implements send behavior.
+import { createMessageReceiptFromOutboundResults } from "openclaw/plugin-sdk/channel-outbound";
+import {
+  readProviderJsonResponse,
+  readResponseTextLimited,
+} from "openclaw/plugin-sdk/provider-http";
 import { stripNextcloudTalkTargetPrefix } from "./normalize.js";
 import {
   convertMarkdownTables,
@@ -10,6 +16,36 @@ import {
   ssrfPolicyFromPrivateNetworkOptIn,
 } from "./send.runtime.js";
 import type { CoreConfig, NextcloudTalkSendResult } from "./types.js";
+
+// Nextcloud Talk runs against self-hosted servers whose responses are not
+// trusted to be small. Cap error bodies so a hostile or misbehaving endpoint
+// cannot stream an unbounded body into memory. (Success JSON is bounded by the
+// shared readProviderJsonResponse helper.)
+const NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_BYTES = 8 * 1024;
+const NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS = 200;
+
+/** Collapses whitespace and caps an error-body prefix to a short, log-safe snippet. */
+function collapseErrorSnippet(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length > NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS) {
+    return `${collapsed.slice(0, NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS)}…`;
+  }
+  return collapsed;
+}
+
+/** Reads a bounded, collapsed error-body snippet without buffering hostile responses. */
+async function readNextcloudTalkErrorSnippet(response: Response): Promise<string> {
+  try {
+    // readResponseTextLimited caps the read at the byte budget and cancels the
+    // upstream stream once full, so a hostile endpoint cannot stream an
+    // unbounded body into memory. Collapse the bounded prefix locally to keep a
+    // short, log-safe error snippet (no new plugin SDK surface required).
+    const text = await readResponseTextLimited(response, NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_BYTES);
+    return collapseErrorSnippet(text);
+  } catch {
+    return "";
+  }
+}
 
 type NextcloudTalkSendOpts = {
   cfg: CoreConfig;
@@ -81,6 +117,28 @@ function recordNextcloudTalkOutboundActivity(accountId: string): void {
   }
 }
 
+function createNextcloudTalkSendReceipt(params: {
+  messageId: string;
+  roomToken: string;
+  replyTo?: string;
+}) {
+  const messageId = params.messageId.trim();
+  return createMessageReceiptFromOutboundResults({
+    results:
+      messageId && messageId !== "unknown"
+        ? [
+            {
+              channel: "nextcloud-talk",
+              messageId,
+              conversationId: params.roomToken,
+            },
+          ]
+        : [],
+    kind: "text",
+    ...(params.replyTo ? { replyToId: params.replyTo } : {}),
+  });
+}
+
 export async function sendMessageNextcloudTalk(
   to: string,
   text: string,
@@ -137,14 +195,15 @@ export async function sendMessageNextcloudTalk(
 
   try {
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => "");
+      const errorBody = await readNextcloudTalkErrorSnippet(response);
       const status = response.status;
       let errorMsg = `Nextcloud Talk send failed (${status})`;
 
       if (status === 400) {
         errorMsg = `Nextcloud Talk: bad request - ${errorBody || "invalid message format"}`;
       } else if (status === 401) {
-        errorMsg = "Nextcloud Talk: authentication failed - check bot secret";
+        errorMsg =
+          "Nextcloud Talk: bot send was rejected - check the bot secret and ensure the bot was installed with --feature response";
       } else if (status === 403) {
         errorMsg = "Nextcloud Talk: forbidden - bot may not have permission in this room";
       } else if (status === 404) {
@@ -159,14 +218,14 @@ export async function sendMessageNextcloudTalk(
     let messageId = "unknown";
     let timestamp: number | undefined;
     try {
-      const data = (await response.json()) as {
+      const data = await readProviderJsonResponse<{
         ocs?: {
           data?: {
             id?: number | string;
             timestamp?: number;
           };
         };
-      };
+      }>(response, "Nextcloud Talk send");
       if (data.ocs?.data?.id != null) {
         messageId = String(data.ocs.data.id);
       }
@@ -174,7 +233,8 @@ export async function sendMessageNextcloudTalk(
         timestamp = data.ocs.data.timestamp;
       }
     } catch {
-      // Response parsing failed, but message was sent.
+      // Response parsing failed (including an over-limit body), but the message
+      // was already accepted by the server, so keep the "unknown" receipt.
     }
 
     if (opts.verbose) {
@@ -183,7 +243,16 @@ export async function sendMessageNextcloudTalk(
 
     recordNextcloudTalkOutboundActivity(account.accountId);
 
-    return { messageId, roomToken, timestamp };
+    return {
+      messageId,
+      roomToken,
+      receipt: createNextcloudTalkSendReceipt({
+        messageId,
+        roomToken,
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+      }),
+      timestamp,
+    };
   } finally {
     await release();
   }
@@ -225,7 +294,7 @@ export async function sendReactionNextcloudTalk(
 
   try {
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => "");
+      const errorBody = await readNextcloudTalkErrorSnippet(response);
       throw new Error(`Nextcloud Talk reaction failed: ${response.status} ${errorBody}`.trim());
     }
 
