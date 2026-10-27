@@ -180,7 +180,7 @@ tmux kill-session -t clawdbot-gateway
 
 # Dashboard
 # URL: http://localhost:18789
-# Token: b12e4c3f2868e7b83a3c80a209eac17b09e3ba3e8b32dfe8
+# Token: in ~/.openclaw/openclaw.json (gateway.auth.token); never paste it into a guide
 ```
 
 **iMessage requires Full Disk Access** — Terminal.app must have FDA granted in System Settings. Running from tmux inherits Terminal's FDA permissions.
